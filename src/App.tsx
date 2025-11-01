@@ -2,7 +2,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Routes, Route, BrowserRouter } from "react-router-dom";
+import { Routes, Route, HashRouter } from "react-router-dom";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import Index from "@/pages/Index";
@@ -17,7 +17,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <BrowserRouter>
+        <HashRouter>
           <Toaster />
           <Sonner />
           <SidebarProvider>
@@ -34,7 +34,7 @@ function App() {
               </SidebarInset>
             </div>
           </SidebarProvider>
-        </BrowserRouter>
+        </HashRouter>
       </TooltipProvider>
     </QueryClientProvider>
   );
