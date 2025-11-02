@@ -108,6 +108,10 @@ export default async function handler(request: Request) {
     }
   }
 
+  /**
+   * --- UPDATED with 9-second timeout ---
+   * Fetches PageSpeed Insights, racing against a 9-second timer.
+   */
   async function getSpeedInsights(url: string): Promise<Record<string, any>> {
     let psiApiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=MOBILE&category=PERFORMANCE&category=ACCESSIBILITY&category=BEST-PRACTICES&category=SEO`;
     
@@ -117,13 +121,28 @@ export default async function handler(request: Request) {
       console.warn('PSI_API_KEY is not set. Free tier usage is limited.');
     }
 
+    // --- NEW: Timeout Promise ---
+    // Creates a promise that rejects after 9 seconds (9000ms)
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new Error("PageSpeed Insights API timed out after 9 seconds."));
+      }, 9000);
+    });
+
     try {
-      const response = await fetch(psiApiUrl);
+      // --- NEW: Promise.race ---
+      // We race the fetch call against the timeout.
+      const response = await Promise.race([
+        fetch(psiApiUrl),
+        timeoutPromise
+      ]) as Response; // Cast to Response, as timeoutPromise won't resolve
+
       if (!response.ok) {
         const errorData = await response.json();
         console.error('PageSpeed Insights API error:', errorData);
         throw new Error(`PageSpeed Insights API failed: ${errorData.error.message}`);
       }
+      
       const data = await response.json();
       const lighthouse = data.lighthouseResult;
       return {
@@ -134,6 +153,7 @@ export default async function handler(request: Request) {
       };
     } catch (error: any) {
       console.error('Error fetching PageSpeed Insights:', error);
+      // This will now catch our custom timeout error too!
       return { error: `PageSpeed Insights failed: ${error.message}` };
     }
   }
@@ -178,8 +198,7 @@ export default async function handler(request: Request) {
     return callGeminiApi(payload);
   }
 
-  // --- NEW: Main Task Handler ---
-  // This switch runs ONE task based on the 'type' from the client.
+  // --- Main Task Handler ---
   try {
     let result;
     switch (type) {
@@ -190,7 +209,6 @@ export default async function handler(request: Request) {
         result = await analyzeCitations(businessName, fullAddress);
         break;
       case 'onPage':
-        // For onPage, we must fetch the HTML *first*.
         const htmlContent = await fetchWebsiteHtml(websiteUrl);
         result = await analyzeOnPageHtml(htmlContent);
         break;
@@ -201,7 +219,6 @@ export default async function handler(request: Request) {
         throw new Error(`Unknown analysis type: ${type}`);
     }
 
-    // Send the *single* result back.
     return new Response(JSON.stringify(result), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
