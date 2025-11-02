@@ -7,6 +7,7 @@ import { ArrowLeft, Download, Star, TrendingUp, AlertCircle, CheckCircle2, MapPi
 import CompetitorTable from '@/components/CompetitorTable';
 import RecommendationCard from '@/components/RecommendationCard';
 import LocalSEOScoreCard from '@/components/LocalSEOScoreCard';
+import { generateSmartRecommendations } from '@/lib/recommendationEngine';
 
 // Helper to get a value safely
 const get = (obj: Record<string, any>, path: string, fallback: any = null) => {

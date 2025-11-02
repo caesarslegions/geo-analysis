@@ -9,6 +9,7 @@ interface RecommendationCardProps {
     description: string;
     impact: string;
     difficulty: string;
+    category?: string;
   };
   index: number;
 }
