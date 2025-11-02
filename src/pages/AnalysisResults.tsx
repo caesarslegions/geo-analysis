@@ -1,92 +1,141 @@
-import React, { useState, useEffect } from 'react'; // Import useState/useEffect
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-// FIX: Changed from alias '@/' to relative paths to resolve build errors.
-import { SidebarTrigger } from '../components/ui/sidebar';
-import { Button } from '../components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
-import { Badge } from '../components/ui/badge';
-import { motion } from 'framer-motion';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+// Note: You might need to adjust component paths if they differ
+import { getAnalysisById, AnalysisDoc, GeoReport } from '@/services/analysisService';
 import { ArrowLeft, Download, Star, TrendingUp, AlertCircle, CheckCircle2, MapPin, Globe, Loader2 } from 'lucide-react';
-// Import the *type* and the *function*
-import { getAnalysisById, AnalysisDoc } from '../services/analysisService'; 
-import CompetitorTable from '../components/CompetitorTable';
-import RecommendationCard from '../components/RecommendationCard';
-import PerformanceChart from '../components/PerformanceChart';
+import CompetitorTable from '@/components/CompetitorTable';
+import RecommendationCard from '@/components/RecommendationCard';
+import PerformanceChart from '@/components/PerformanceChart';
+
+// Helper to get a value safely
+const get = (obj: Record<string, any>, path: string, fallback: any = null) => {
+  return path.split('.').reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : fallback), obj);
+};
 
 const AnalysisResults = () => {
-  const { id } = useParams();
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   
-  // --- NEW: State for loading and data ---
+  // --- NEW: State to hold the fetched analysis ---
   const [analysis, setAnalysis] = useState<AnalysisDoc | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // --- NEW: useEffect to fetch data on component mount ---
+  // --- NEW: useEffect to fetch data on mount ---
   useEffect(() => {
     if (!id) {
+      setError('No analysis ID provided.');
       setIsLoading(false);
       return;
     }
-    async function loadAnalysis() {
+
+    const fetchAnalysis = async () => {
       setIsLoading(true);
-      const data = await getAnalysisById(id);
-      setAnalysis(data);
-      setIsLoading(false);
-    }
-    loadAnalysis();
-  }, [id]); // Re-run this if the 'id' parameter changes
+      setError(null);
+      try {
+        const data = await getAnalysisById(id);
+        if (data) {
+          setAnalysis(data);
+          console.log('Fetched analysis data:', data);
+        } else {
+          setError('Analysis not found.');
+        }
+      } catch (err: any) {
+        setError(`Failed to fetch analysis: ${err.message}`);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchAnalysis();
+  }, [id]); // Re-run if ID changes
 
   const handleDownload = () => {
     if (!analysis) return;
     console.log('Downloading analysis report...');
-    const dataStr = JSON.stringify(analysis.report, null, 2); // Download the report part
+    const dataStr = JSON.stringify(analysis, null, 2);
     const dataBlob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(dataBlob);
     const link = document.createElement('a');
     link.href = url;
     link.download = `analysis-${analysis.id}.json`;
     link.click();
+    URL.revokeObjectURL(url);
   };
 
-  // --- NEW: Loading State ---
+  // --- NEW: Loading and Error states ---
   if (isLoading) {
     return (
-      <div className="flex flex-col h-full w-full">
-        <header className="flex items-center sticky top-0 z-10 gap-4 border-b bg-white px-6 py-4">
-          <SidebarTrigger />
-          <h1 className="text-2xl font-semibold">Loading Analysis...</h1>
-        </header>
-        <main className="flex-1 flex items-center justify-center">
-          <Loader2 className="animate-spin text-blue-600" size={48} />
-        </main>
+      <div className="flex flex-col h-full w-full items-center justify-center p-6">
+        <Loader2 className="animate-spin text-blue-600" size={64} />
+        <p className="text-xl text-gray-700 mt-4">Loading your report...</p>
       </div>
     );
   }
 
-  // --- NEW: Not Found State ---
-  if (!analysis) {
+  if (error || !analysis) {
     return (
-      <div className="flex flex-col h-full w-full">
-        <header className="flex items-center sticky top-0 z-10 gap-4 border-b bg-white px-6 py-4">
-          <SidebarTrigger />
+      <div className="flex flex-col h-full w-full p-6">
+        <header className="flex items-center sticky top-0 z-10 gap-4 border-b bg-white px-6 py-4 mb-6">
+          <Button variant="ghost" size="sm" onClick={() => navigate('/history')}>
+            <ArrowLeft className="mr-2" size={18} />
+            Back
+          </Button>
           <h1 className="text-2xl font-semibold">Analysis Not Found</h1>
         </header>
         <main className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <p className="text-gray-600 mb-4">Could not find an analysis with ID: {id}</p>
-            <Button onClick={() => navigate('/history')}>View All Analyses</Button>
+          <div className="text-center bg-white p-10 rounded-lg shadow-md">
+            <AlertCircle className="text-red-500 mx-auto" size={48} />
+            <p className="text-gray-700 text-lg mt-4">{error || 'Could not find the requested analysis.'}</p>
+            <Button onClick={() => navigate('/history')} className="mt-6">View All Analyses</Button>
           </div>
         </main>
       </div>
     );
   }
 
-  // --- This is your original code, now it works! ---
-  // I've updated the data access to use `analysis.report.gbpAnalysis.rating` etc.
+  // --- Data from the report ---
+  const report = analysis.report;
+  const gbp = report.gbpAnalysis;
+  const citations = report.citationAnalysis;
+  const onPage = report.onPageAnalysis;
+  const speed = report.speedInsights;
+
+  // --- Safely get data with fallbacks ---
+  const rating = get(gbp, 'rating', 'N/A');
+  const reviewCount = get(gbp, 'reviewCount', 'N/A');
+  const competitorsCount = get(gbp, 'competitors.length', 0);
+  const performanceScore = get(speed, 'performance', 'N/A');
+
+  // --- TODO: You'll need to generate recommendations ---
+  // For now, let's create a placeholder from the on-page analysis
+  const recommendations = [
+    {
+      title: 'Title Tag',
+      description: onPage.titleTag ? `Your title tag is: "${onPage.titleTag}"` : "You are missing a title tag.",
+      impact: 'High',
+      difficulty: 'Easy'
+    },
+    {
+      title: 'Meta Description',
+      description: onPage.metaDescription ? `Your meta description is good.` : "You are missing a meta description. This is important for search rankings.",
+      impact: 'High',
+      difficulty: 'Easy'
+    },
+    {
+      title: 'Local Business Schema',
+      description: onPage.hasLocalBusinessSchema ? `Great job including schema!` : "You are missing LocalBusiness schema. This helps Google understand your business.",
+      impact: 'Medium',
+      difficulty: 'Medium'
+    }
+  ];
+
   return (
     <div className="flex flex-col h-full w-full">
       <header className="flex items-center sticky top-0 z-10 gap-4 border-b bg-white px-6 py-4">
-        <SidebarTrigger />
+        {/* <SidebarTrigger /> You may need this component from your original layout */}
         <Button variant="ghost" size="sm" onClick={() => navigate('/history')}>
           <ArrowLeft className="mr-2" size={18} />
           Back
@@ -102,101 +151,82 @@ const AnalysisResults = () => {
         <div className="max-w-7xl mx-auto space-y-6">
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-              <Card className="border-2">
-                <CardContent className="pt-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-600 mb-1">Your Rating</p>
-                      <p className="text-3xl font-bold">{analysis.report.gbpAnalysis.rating || 'N/A'}</p>
-                    </div>
-                    <Star className="text-yellow-500" size={32} />
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-              <Card className="border-2">
-                <CardContent className="pt-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-600 mb-1">Your Reviews</p>
-                      <p className="text-3xl font-bold">{analysis.report.gbpAnalysis.reviewCount || 'N/A'}</p>
-                    </div>
-                    <TrendingUp className="text-blue-500" size={32} />
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-              <Card className="border-2">
-                <CardContent className="pt-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-600 mb-1">Competitors</p>
-                      <p className="text-3xl font-bold">{analysis.report.gbpAnalysis.topCompetitors?.length || 0}</p>
-                    </div>
-                    <MapPin className="text-purple-500" size={32} />
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
-              <Card className="border-2">
-                <CardContent className="pt-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-600 mb-1">Performance</p>
-                      <p className="text-3xl font-bold">{analysis.report.speedInsights.performance?.toFixed(0) || 'N/A'}%</p>
-                    </div>
-                    <Globe className="text-green-500" size={32} />
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          </div>
-
-          {/* Performance Chart - This component will need to be updated to accept the `analysis.report` object */}
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}>
-            {/* <PerformanceChart report={analysis.report} /> */}
-            <Card><CardHeader><CardTitle>Performance Chart (Placeholder)</CardTitle></CardHeader><CardContent>You'll need to pass the `analysis.report` prop to your chart component.</CardContent></Card>
-          </motion.div>
-
-          {/* AI Recommendations */}
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }}>
-            <Card className="border-2">
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <div className="bg-gradient-to-br from-purple-500 to-pink-500 p-2 rounded-lg">
-                    <TrendingUp className="text-white" size={24} />
-                  </div>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
                   <div>
-                    <CardTitle className="text-2xl">AI-Powered Recommendations</CardTitle>
-                    <CardDescription className="text-base">
-                      Prioritized action plan to improve your local SEO performance
-                    </CardDescription>
+                    <p className="text-sm text-gray-600 mb-1">Your Rating</p>
+                    <p className="text-3xl font-bold">{rating}</p>
                   </div>
+                  <Star className="text-yellow-500" size={32} />
                 </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* This assumes recommendations are part of your report object, which wasn't in the gemini prompt. */}
-                {/* You may need to add another Gemini call in `api/get-analysis.ts` to generate these! */}
-                <p>Recommendations placeholder. You'll need to generate these.</p>
-                {/* {analysis.report.recommendations.map((rec, index) => (
-                  <RecommendationCard key={index} recommendation={rec} index={index} />
-                ))} */}
               </CardContent>
             </Card>
-          </motion.div>
 
-          {/* Competitor Comparison Table */}
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7 }}>
-            {/* <CompetitorTable report={analysis.report} /> */}
-            <Card><CardHeader><CardTitle>Competitor Table (Placeholder)</CardTitle></CardHeader><CardContent>You'll need to pass the `analysis.report` prop to your table component.</CardContent></Card>
-          </motion.div>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600 mb-1">Your Reviews</p>
+                    <p className="text-3xl font-bold">{reviewCount}</p>
+                  </div>
+                  <TrendingUp className="text-blue-500" size={32} />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600 mb-1">Competitors</p>
+                    <p className="text-3xl font-bold">{competitorsCount}</p>
+                  </div>
+                  <MapPin className="text-purple-500" size={32} />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600 mb-1">Performance</p>
+                    <p className="text-3xl font-bold">{performanceScore}{performanceScore !== 'N/A' ? '%' : ''}</p>
+                  </div>
+                  <Globe className="text-green-500" size={32} />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Performance Chart - This now receives the real 'analysis' prop */}
+          <PerformanceChart analysis={analysis} />
+
+          {/* AI Recommendations */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <div className="bg-gradient-to-br from-purple-500 to-pink-500 p-2 rounded-lg">
+                  <TrendingUp className="text-white" size={24} />
+                </div>
+                <div>
+                  <CardTitle className="text-2xl">AI-Powered Recommendations</CardTitle>
+                  <CardDescription className="text-base">
+                    Prioritized action plan to improve your local SEO performance
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {recommendations.map((rec, index) => (
+                <RecommendationCard key={index} recommendation={rec} index={index} />
+              ))}
+            </CardContent>
+          </Card>
+
+          {/* Competitor Comparison Table - This now receives the real 'analysis' prop */}
+          <CompetitorTable analysis={analysis} />
         </div>
       </main>
     </div>
@@ -204,4 +234,5 @@ const AnalysisResults = () => {
 };
 
 export default AnalysisResults;
+
 
