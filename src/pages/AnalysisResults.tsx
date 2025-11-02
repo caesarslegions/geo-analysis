@@ -6,7 +6,7 @@ import { getAnalysisById, AnalysisDoc, GeoReport } from '@/services/analysisServ
 import { ArrowLeft, Download, Star, TrendingUp, AlertCircle, CheckCircle2, MapPin, Globe, Loader2 } from 'lucide-react';
 import CompetitorTable from '@/components/CompetitorTable';
 import RecommendationCard from '@/components/RecommendationCard';
-import PerformanceChart from '@/components/PerformanceChart';
+import LocalSEOScoreCard from '@/components/LocalSEOScoreCard';
 
 // Helper to get a value safely
 const get = (obj: Record<string, any>, path: string, fallback: any = null) => {
@@ -122,7 +122,28 @@ const AnalysisResults = () => {
   const rating = get(gbp, 'rating', 'N/A');
   const reviewCount = get(gbp, 'reviewCount', 'N/A');
   const competitorsCount = get(gbp, 'competitors.length', 0);
-  const performanceScore = get(speed, 'performance', 'N/A');
+  
+  // Calculate Local SEO Score for the summary card
+  const calculateQuickScore = () => {
+    if (!onPage && !gbp && !citations) return 'N/A';
+    
+    let score = 0;
+    let checks = 0;
+    
+    // Quick calculation based on available data
+    if (gbp?.rating) {
+      score += (gbp.rating / 5) * 25;
+      checks++;
+    }
+    if (onPage?.hasLocalBusinessSchema) score += 25;
+    if (onPage?.titleTag) score += 15;
+    if (onPage?.localKeywordsInTitle || onPage?.cityInTitle) score += 10;
+    if (citations && !citations.error) score += 25;
+    
+    return Math.round(score);
+  };
+
+  const localSEOScore = calculateQuickScore();
 
   // Generate recommendations only if onPage data exists
   const recommendations = [];
@@ -205,8 +226,8 @@ const AnalysisResults = () => {
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-600 mb-1">Performance</p>
-                    <p className="text-3xl font-bold">{performanceScore}{performanceScore !== 'N/A' ? '%' : ''}</p>
+                    <p className="text-sm text-gray-600 mb-1">SEO Score</p>
+                    <p className="text-3xl font-bold">{localSEOScore}{localSEOScore !== 'N/A' ? '/100' : ''}</p>
                   </div>
                   <Globe className="text-green-500" size={32} />
                 </div>
@@ -214,15 +235,8 @@ const AnalysisResults = () => {
             </Card>
           </div>
 
-          {/* Performance Chart - Only show if speed data exists */}
-          {speed ? (
-            <PerformanceChart analysis={analysis.report} />
-          ) : (
-            <ErrorCard 
-              title="Performance Chart" 
-              error={report.speedInsights?.error || 'Performance data could not be loaded.'} 
-            />
-          )}
+          {/* Local SEO Score Card - Always show, uses all available data */}
+          <LocalSEOScoreCard report={analysis.report} />
 
           {/* AI Recommendations - Only show if onPage data exists */}
           {onPage && recommendations.length > 0 ? (
