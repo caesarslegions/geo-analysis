@@ -1,4 +1,3 @@
-// --- NEW FIREBASE IMPORTS ---
 import { db, appId, getUserId } from '../lib/firebase';
 import { 
   collection, 
@@ -10,7 +9,7 @@ import {
   query
 } from 'firebase/firestore';
 
-// This is the main data structure for your report.
+// Main report data structure
 export interface GeoReport {
   gbpAnalysis: Record<string, any>;
   citationAnalysis: Record<string, any>;
@@ -18,23 +17,62 @@ export interface GeoReport {
   speedInsights: Record<string, any>;
 }
 
+// Type for saved analysis documents
 export interface AnalysisDoc {
   id: string;
   userId: string;
   businessName: string;
+  websiteUrl: string; // Added this
   createdAt: Date;
   report: GeoReport;
 }
 
-// --- FIX: Add placeholder exports for other components ---
-// Your components `CompetitorTable` and `RecommendationCard` are likely
-// importing these types, so we'll provide placeholders.
-export interface Analysis { [key: string]: any }
-export interface Recommendation { [key: string]: any }
-// --------------------------------------------------------
+// --- NEW: Helper function to call our multi-task API ---
+/**
+ * Calls our /api/get-analysis function for a *single* task.
+ */
+async function getSingleAnalysis(
+  type: 'gbp' | 'citations' | 'onPage' | 'speed',
+  businessName: string,
+  fullAddress: string,
+  websiteUrl: string
+): Promise<any> {
+  
+  const body = {
+    businessName,
+    fullAddress,
+    websiteUrl,
+    type, // We send the type to tell the serverless function what to do
+  };
 
+  try {
+    const response = await fetch('/api/get-analysis', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
 
-// --- NEW: Helper function to save the report (No changes needed) ---
+    if (!response.ok) {
+      // Try to parse the error from the serverless function
+      try {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `API call failed with status ${response.status}`);
+      } catch (e) {
+        throw new Error(`API call failed with status ${response.status} and non-JSON response.`);
+      }
+    }
+    
+    // We expect a JSON response for the single task
+    return await response.json();
+
+  } catch (error: any) {
+    console.error(`Error fetching analysis type ${type}:`, error);
+    // Return a standard error object so Promise.allSettled can handle it
+    return { error: error.message };
+  }
+}
+
+// --- NEW: Helper function to save the report ---
 async function saveAnalysis(userId: string, report: GeoReport, businessName: string, websiteUrl: string): Promise<string> {
   try {
     const collectionPath = `artifacts/${appId}/users/${userId}/analyses`;
@@ -43,7 +81,7 @@ async function saveAnalysis(userId: string, report: GeoReport, businessName: str
     const docRef = await addDoc(analysesCollection, {
       userId: userId,
       businessName: businessName,
-      websiteUrl: websiteUrl,
+      websiteUrl: websiteUrl, // Save the URL too
       createdAt: serverTimestamp(),
       report: report
     });
@@ -56,42 +94,42 @@ async function saveAnalysis(userId: string, report: GeoReport, businessName: str
   }
 }
 
-
-// --- !! UPDATED !! ---
-// This function is now much simpler. It calls your secure "doorman"
-// serverless function instead of calling Gemini/PageSpeed directly.
+// --- RE-WRITTEN: This function now manages 4 parallel API calls ---
 export async function generateRealReport(
   businessName: string,
   fullAddress: string,
   websiteUrl: string
 ): Promise<GeoReport> {
-  console.log('Starting real report generation...');
+  console.log('Starting real report generation (4 parallel client-side calls)...');
 
   try {
-    // --- Step 1: Call your secure Netlify function ---
-    // This ONE call replaces all the separate calls to Gemini, PageSpeed, and fetching HTML.
-    const response = await fetch('/api/get-analysis', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        businessName,
-        fullAddress,
-        websiteUrl
-      })
-    });
+    // --- Step 1: Run all 4 analyses in parallel from the client ---
+    const [gbpResult, citationResult, onPageResult, speedResult] = await Promise.allSettled([
+      getSingleAnalysis('gbp', businessName, fullAddress, websiteUrl),
+      getSingleAnalysis('citations', businessName, fullAddress, websiteUrl),
+      getSingleAnalysis('onPage', businessName, fullAddress, websiteUrl),
+      getSingleAnalysis('speed', businessName, fullAddress, websiteUrl)
+    ]);
 
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.error || `Failed to generate report (${response.status})`);
-    }
+    // --- Step 2: Combine results into the final report ---
+    const report: GeoReport = {
+      gbpAnalysis: gbpResult.status === 'fulfilled' 
+        ? gbpResult.value 
+        : { error: gbpResult.reason.message },
+      citationAnalysis: citationResult.status === 'fulfilled' 
+        ? citationResult.value 
+        : { error: citationResult.reason.message },
+      onPageAnalysis: onPageResult.status === 'fulfilled' 
+        ? onPageResult.value 
+        : { error: onPageResult.reason.message },
+      speedInsights: speedResult.status === 'fulfilled' 
+        ? speedResult.value 
+        : { error: speedResult.reason.message }
+    };
 
-    const report: GeoReport = await response.json();
-    
     console.log('Report generation complete:', report);
 
-    // --- Step 2: Get User ID and Save Report (No changes) ---
+    // --- Step 3: Get User ID and Save Report ---
     try {
       const userId = await getUserId();
       await saveAnalysis(userId, report, businessName, websiteUrl);
@@ -107,37 +145,8 @@ export async function generateRealReport(
   }
 }
 
-// --- FIX: Restored your full mock data function ---
-export function generateMockReport(): GeoReport {
-  console.warn('Generating MOCK report');
-  return {
-    gbpAnalysis: {
-      name: 'Mock Business',
-      rating: 4.5,
-      reviews: 120,
-      claimed: true,
-      competitors: [{ name: 'Mock Competitor 1' }, { name: 'Mock Competitor 2' }]
-    },
-    citationAnalysis: {
-      yelp: { found: true, napMatch: true },
-      foursquare: { found: false, napMatch: false }
-    },
-    onPageAnalysis: {
-      titleTag: 'Mock Title | Mock City',
-      hasSchema: true,
-      isMobileFriendly: true
-    },
-    speedInsights: {
-      performance: 85,
-      accessibility: 95,
-      mobileFriendly: true
-    }
-  };
-}
-// ----------------------------------------------------
+// --- Firestore Data Fetching Functions (Unchanged) ---
 
-// --- UPDATED: getAllAnalyses (No functional changes) ---
-// This function is ALREADY correct, just confirming it's good.
 export async function getAllAnalyses(): Promise<AnalysisDoc[]> {
   console.log('Fetching all analyses from Firestore...');
   try {
@@ -154,6 +163,7 @@ export async function getAllAnalyses(): Promise<AnalysisDoc[]> {
         id: doc.id,
         userId: data.userId,
         businessName: data.businessName,
+        websiteUrl: data.websiteUrl || '', // Add fallback
         createdAt: data.createdAt ? data.createdAt.toDate() : new Date(),
         report: data.report
       });
@@ -165,12 +175,10 @@ export async function getAllAnalyses(): Promise<AnalysisDoc[]> {
 
   } catch (error) {
     console.error("Error in getAllAnalyses:", error);
-    return []; 
+    return [];
   }
 }
 
-// --- UPDATED: getAnalysisById (No functional changes) ---
-// This function is ALREADY correct, just confirming it's good.
 export async function getAnalysisById(id: string): Promise<AnalysisDoc | null> {
   console.log(`Fetching analysis by ID: ${id}`);
   try {
@@ -185,6 +193,7 @@ export async function getAnalysisById(id: string): Promise<AnalysisDoc | null> {
         id: docSnap.id,
         userId: data.userId,
         businessName: data.businessName,
+        websiteUrl: data.websiteUrl || '', // Add fallback
         createdAt: data.createdAt ? data.createdAt.toDate() : new Date(),
         report: data.report
       };
@@ -195,7 +204,7 @@ export async function getAnalysisById(id: string): Promise<AnalysisDoc | null> {
     }
   } catch (error) {
     console.error("Error in getAnalysisById:", error);
-    return null; 
+    return null;
   }
 }
 
