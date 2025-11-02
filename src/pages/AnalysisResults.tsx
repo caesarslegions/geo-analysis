@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-// --- FIX: Use relative paths based on your file structure ---
-import { getAnalysisById, AnalysisDoc, GeoReport } from '../services/analysisService';
+// --- FIX: Reverting to the aliased paths your project uses ---
+import { getAnalysisById, AnalysisDoc, GeoReport } from '@/services/analysisService';
 import { ArrowLeft, Download, Star, TrendingUp, AlertCircle, CheckCircle2, MapPin, Globe, Loader2 } from 'lucide-react';
-import CompetitorTable from '../components/ui/CompetitorTable';
-import RecommendationCard from '../components/ui/RecommendationCard';
-import PerformanceChart from '../components/ui/PerformanceChart';
+import CompetitorTable from '@/components/CompetitorTable';
+import RecommendationCard from '@/components/RecommendationCard';
+import PerformanceChart from '@/components/PerformanceChart';
 
 // Helper to get a value safely
 const get = (obj: Record<string, any>, path: string, fallback: any = null) => {
@@ -266,5 +266,7 @@ const AnalysisResults = () => {
 };
 
 export default AnalysisResults;
+
+
 
 
