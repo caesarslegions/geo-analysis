@@ -1,24 +1,33 @@
-# This is your new Netlify configuration file.
-# Place this file in the root of your project (GEO-ANALYSIS/netlify.toml).
+# This is the "ultimate" config file combining all our fixes.
 
 [build]
-  # This command tells Netlify how to build your site.
-  # It's taken from your build log.
+  # The command to build your site
   command = "bun run build"
   
-  # This tells Netlify where your finished site is (the build output).
-  # This is also from your build log.
+  # The folder with your built site
   publish = "dist"
 
 [build.environment]
-  # --- NEW FIX ---
-  # The "OMIT_VALUES" was not working.
-  # This new line tells Netlify's scanner to turn off the "smart detection"
-  # that is causing the false positive on the Firebase library.
-  # This is safe because your actual keys are stored in Netlify's environment.
+  # Disables the false-positive secret scanner
   SECRETS_SCAN_SMART_DETECTION_ENABLED = "false"
 
-# This part tells Netlify to treat your "api" folder as serverless functions.
-# It's the standard setting and good practice to have.
 [functions]
+  # Tells Netlify where your "doorman" API files are
   directory = "api/"
+
+# --- Redirects for API & React App ---
+
+# Rule 1: Makes sure "/api/..." requests go to your functions.
+# This MUST come before the next rule.
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+# Rule 2: The "catch-all" for your React app.
+# Any other request goes to your index.html.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+

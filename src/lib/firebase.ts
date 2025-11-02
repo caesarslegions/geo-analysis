@@ -10,36 +10,41 @@ import {
 } from "firebase/auth";
 import { getFirestore, setLogLevel } from "firebase/firestore";
 
-// --- FIX: Add declarations for global variables ---
-// This tells TypeScript that these variables will be provided by the environment.
-declare const __app_id: string;
-declare const __firebase_config: string;
-declare const __initial_auth_token: string;
+// --- FIX: Read from Vite's Environment Variables ---
+// We will now read from `import.meta.env` which Netlify populates.
+// This removes the need for the `declare const` hacks.
+const appId = import.meta.env.VITE_APP_ID || 'default-app-id';
 
-// Use the global variables, providing defaults for local development
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const firebaseConfig = typeof __firebase_config !== 'undefined' 
-  ? JSON.parse(__firebase_config) 
-  : { apiKey: "MOCK_KEY", authDomain: "MOCK_DOMAIN", projectId: "MOCK_PROJECT_ID" }; // Add mock config
+// Get the config string from the environment and parse it.
+// Provide a fallback mock config for local dev *only*.
+const firebaseConfigStr = import.meta.env.VITE_FIREBASE_CONFIG;
+const firebaseConfig = firebaseConfigStr 
+  ? JSON.parse(firebaseConfigStr)
+  : { 
+      apiKey: "MOCK_KEY_FOR_LOCAL_DEV", 
+      authDomain: "MOCK_DOMAIN", 
+      projectId: "MOCK_PROJECT_ID" 
+    };
+
+// --- End of Fix ---
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// --- FIX: Added Debug Logging ---
-// This will help you see Firestore logs in the console
 setLogLevel('debug');
 
-// Set persistence to local
 setPersistence(auth, browserLocalPersistence)
   .catch((error) => {
     console.error("Error setting persistence: ", error);
   });
 
-// --- Authentication ---
 let currentUserId: string | null = null;
 let isAuthReady = false;
 let authPromise: Promise<User | null> | null = null;
+
+// This will be provided by the Netlify/Canvas environment
+declare const __initial_auth_token: string;
 
 const initializeAuth = () => {
   if (authPromise) return authPromise;
@@ -51,18 +56,20 @@ const initializeAuth = () => {
         currentUserId = user.uid;
         isAuthReady = true;
         resolve(user);
-      } else if (typeof __initial_auth_token !== 'undefined') {
+      } else if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        // Use custom token if provided (e.g., in Canvas)
         console.log("Firebase Auth: Signing in with custom token...");
         try {
           const userCredential = await signInWithCustomToken(auth, __initial_auth_token);
           currentUserId = userCredential.user.uid;
           isAuthReady = true;
-          resolve(userCredential.user);
+          resolve(userCredential.user.uid);
         } catch (error) {
           console.error("Firebase Auth: Error signing in with custom token:", error);
           reject(error);
         }
       } else {
+        // Standard web flow: sign in anonymously
         console.log("Firebase Auth: No user, signing in anonymously...");
         try {
           const userCredential = await signInAnonymously(auth);
@@ -71,6 +78,8 @@ const initializeAuth = () => {
           resolve(userCredential.user);
         } catch (error) {
           console.error("Firebase Auth: Error signing in anonymously:", error);
+          // This is where your MOCK_KEY error was happening.
+          // It will now use the *real* key.
           reject(error);
         }
       }
@@ -83,11 +92,8 @@ const initializeAuth = () => {
   return authPromise;
 };
 
-// Ensure auth is initialized
 initializeAuth();
 
-// --- Helper function to get User ID ---
-// This ensures auth is ready before returning the ID
 const getUserId = async (): Promise<string> => {
   if (isAuthReady && currentUserId) {
     return currentUserId;
@@ -99,9 +105,9 @@ const getUserId = async (): Promise<string> => {
     return currentUserId;
   }
   
-  // Fallback, though it shouldn't be reached
   console.warn("getUserId fallback: creating random ID");
   return crypto.randomUUID();
 };
 
 export { db, auth, appId, getUserId };
+
