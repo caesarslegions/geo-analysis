@@ -23,7 +23,8 @@ export default async function handler(request: Request) {
   }
 
   // Get the data from the React app's request
-  const { businessName, fullAddress, websiteUrl, htmlContent } = await request.json();
+  // --- FIX: We ONLY need the URL, not the htmlContent ---
+  const { businessName, fullAddress, websiteUrl } = await request.json();
 
   if (!businessName || !fullAddress || !websiteUrl) {
     return new Response(JSON.stringify({ error: 'Missing required fields' }), {
@@ -100,6 +101,32 @@ export default async function handler(request: Request) {
     }
   }
 
+  // --- NEW FUNCTION: Server-side HTML fetching ---
+  /**
+   * Fetches the raw HTML of a website.
+   */
+  async function fetchWebsiteHtml(websiteUrl: string): Promise<string> {
+    console.log(`Fetching HTML for: ${websiteUrl}`);
+    try {
+      const response = await fetch(websiteUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          'Accept': 'text/html'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch website HTML (${response.status}): ${response.statusText}`);
+      }
+      return await response.text();
+    } catch (err: any) {
+      console.error('Error fetching site HTML:', err);
+      // Return a minimal error string so the analysis can still run
+      return '<html><body><title>Error</title>Error: Could not fetch website content.</body></html>';
+    }
+  }
+
+
   /**
    * Fetches PageSpeed Insights.
    */
@@ -165,6 +192,8 @@ export default async function handler(request: Request) {
   }
 
   async function analyzeOnPageHtml(htmlContent: string): Promise<Record<string, any>> {
+    // --- THIS IS THE FIX ---
+    // The htmlContent passed in here is now the *real* HTML.
     const maxHtmlLength = 50000;
     const truncatedHtml = htmlContent.length > maxHtmlLength 
       ? htmlContent.substring(0, maxHtmlLength) + "\n... [HTML Truncated] ..." 
@@ -184,10 +213,15 @@ export default async function handler(request: Request) {
 
   // --- Run all analyses in parallel ---
   try {
+    // --- THIS IS THE FIX ---
+    // First, we fetch the HTML ourselves.
+    const htmlContent = await fetchWebsiteHtml(websiteUrl);
+
+    // Then, we run all the analyses.
     const [gbpResult, citationResult, onPageResult, speedResult] = await Promise.allSettled([
       analyzeGbp(businessName, fullAddress),
       analyzeCitations(businessName, fullAddress),
-      analyzeOnPageHtml(htmlContent), // We only need to pass HTML for this
+      analyzeOnPageHtml(htmlContent), // Now we pass the real HTML here.
       getSpeedInsights(websiteUrl)
     ]);
 
