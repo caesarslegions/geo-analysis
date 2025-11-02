@@ -43,7 +43,7 @@ export interface Recommendation {
 // --- END OF FIX ---
 
 
-// --- NEW: Helper function to call our multi-task API ---
+// --- Helper function to call our multi-task API ---
 /**
  * Calls our /api/get-analysis function for a *single* task.
  */
@@ -88,7 +88,7 @@ async function getSingleAnalysis(
   }
 }
 
-// --- NEW: Helper function to save the report ---
+// --- Helper function to save the report ---
 async function saveAnalysis(userId: string, report: GeoReport, businessName: string, websiteUrl: string): Promise<string> {
   try {
     const collectionPath = `artifacts/${appId}/users/${userId}/analyses`;
@@ -111,11 +111,12 @@ async function saveAnalysis(userId: string, report: GeoReport, businessName: str
 }
 
 // --- RE-WRITTEN: This function now manages 4 parallel API calls ---
+// --- NEW: It now returns the docId (string) instead of the report ---
 export async function generateRealReport(
   businessName: string,
   fullAddress: string,
   websiteUrl: string
-): Promise<GeoReport> {
+): Promise<string> { // <-- CHANGED RETURN TYPE
   console.log('Starting real report generation (4 parallel client-side calls)...');
 
   try {
@@ -148,12 +149,14 @@ export async function generateRealReport(
     // --- Step 3: Get User ID and Save Report ---
     try {
       const userId = await getUserId();
-      await saveAnalysis(userId, report, businessName, websiteUrl);
+      // --- NEW: Get the ID from the save function ---
+      const docId = await saveAnalysis(userId, report, businessName, websiteUrl);
+      return docId; // <-- RETURN THE NEW ID
     } catch (saveError: any) {
       console.error("Failed to save report, but returning to user:", saveError.message);
+      // Re-throw the error so the UI knows it failed
+      throw new Error(`Failed to save report: ${saveError.message}`);
     }
-
-    return report;
 
   } catch (error: any) {
     console.error('Fatal error during report generation:', error);

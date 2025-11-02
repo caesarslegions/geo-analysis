@@ -1,19 +1,11 @@
 import React, { useState } from 'react';
-// import { useNavigate } from 'react-router-dom'; // Keep this if you use react-router
-import { generateRealReport, GeoReport } from '../services/analysisService';
+// --- NEW: Import useNavigate ---
+import { useNavigate } from 'react-router-dom';
+// --- FIX: Using alias path ---
+import { generateRealReport } from '@/services/analysisService';
 
-// This is a simple results display component. You can replace this with
-// your 'AnalysisResults.tsx' page navigation.
-const ResultsDisplay = ({ report }: { report: GeoReport }) => {
-  return (
-    <div className="mt-8 p-4 bg-gray-50 rounded-md">
-      <h2 className="text-xl font-bold mb-4">Analysis Complete!</h2>
-      <pre className="text-sm bg-gray-900 text-white p-4 rounded-md overflow-x-auto">
-        {JSON.stringify(report, null, 2)}
-      </pre>
-    </div>
-  );
-};
+// (You can delete the ResultsDisplay component from this file if you want)
+// const ResultsDisplay = ...
 
 
 export default function NewAnalysis() {
@@ -22,9 +14,10 @@ export default function NewAnalysis() {
   const [websiteUrl, setWebsiteUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [report, setReport] = useState<GeoReport | null>(null); // State to hold the report
+  // const [report, setReport] = useState<GeoReport | null>(null); // We don't need this anymore
   
-  // const navigate = useNavigate(); // Uncomment if you use react-router
+  // --- NEW: Initialize the navigate function ---
+  const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,17 +28,15 @@ export default function NewAnalysis() {
 
     setIsLoading(true);
     setError(null);
-    setReport(null); // Clear previous report
+    // setReport(null); // We don't need this
 
     try {
-      // THIS IS THE KEY: We call the real function now
-      const newReport: GeoReport = await generateRealReport(businessName, fullAddress, websiteUrl);
+      // --- UPDATED: This function now returns the new report ID ---
+      const newReportId: string = await generateRealReport(businessName, fullAddress, websiteUrl);
       
-      setReport(newReport); // Set the report in state to display it
-
-      // --- OR ---
-      // If you want to navigate to a new page:
-      // navigate('/analysis-results', { state: { report: newReport } });
+      // --- THE FINAL STEP! ---
+      // Navigate to the beautiful results page.
+      navigate(`/analysis/${newReportId}`);
 
     } catch (err: any) {
       setError(`Failed to generate report: ${err.message}`);
@@ -111,8 +102,8 @@ export default function NewAnalysis() {
         )}
       </form>
 
-      {/* Simple display for the results. You can remove this if you navigate to a new page. */}
-      {report && <ResultsDisplay report={report} />}
+      {/* We no longer need to display the raw report here! */}
+      {/* {report && <ResultsDisplay report={report} />} */}
     </div>
   );
 }
