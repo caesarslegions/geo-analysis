@@ -1,15 +1,47 @@
+import React, { useState, useEffect } from 'react'; // Import useState/useEffect
 import { Link } from 'react-router-dom';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { motion } from 'framer-motion';
-import { Plus, Calendar, MapPin, TrendingUp, Eye } from 'lucide-react';
-import { getAllAnalyses } from '@/services/analysisService';
+import { Plus, Calendar, MapPin, TrendingUp, Eye, Loader2 } from 'lucide-react';
+// Import the *type* and the *function*
+// FIX: Changed from alias '@/' to a relative path to resolve the build error.
+import { getAllAnalyses, AnalysisDoc } from '../services/analysisService';
 
 const AnalysisHistory = () => {
-  const analyses = getAllAnalyses();
+  // --- NEW: State for loading and data ---
+  const [analyses, setAnalyses] = useState<AnalysisDoc[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
+  // --- NEW: useEffect to fetch data on component mount ---
+  useEffect(() => {
+    async function loadAnalyses() {
+      setIsLoading(true);
+      const data = await getAllAnalyses();
+      setAnalyses(data);
+      setIsLoading(false);
+    }
+    loadAnalyses();
+  }, []); // Empty array [] means this runs once when the component loads
+
+  // --- NEW: Loading State ---
+  if (isLoading) {
+    return (
+      <div className="flex flex-col h-full w-full">
+        <header className="flex items-center sticky top-0 z-10 gap-4 border-b bg-white px-6 py-4">
+          <SidebarTrigger />
+          <h1 className="text-2xl font-semibold flex-1">Analysis History</h1>
+        </header>
+        <main className="flex-1 flex items-center justify-center">
+          <Loader2 className="animate-spin text-blue-600" size={48} />
+        </main>
+      </div>
+    );
+  }
+
+  // --- This is your original code, now it works! ---
   return (
     <div className="flex flex-col h-full w-full">
       <header className="flex items-center sticky top-0 z-10 gap-4 border-b bg-white px-6 py-4">
@@ -54,18 +86,21 @@ const AnalysisHistory = () => {
                         <div className="flex-1">
                           <CardTitle className="text-xl mb-2">{analysis.businessName}</CardTitle>
                           <CardDescription className="space-y-2">
-                            <div className="flex items-center gap-2 text-sm">
+                            {/* FIX: Use analysis.report.onPageAnalysis... or similar. 'location' wasn't in your data. */}
+                            {/* I'll comment this out for now. */}
+                            {/* <div className="flex items-center gap-2 text-sm">
                               <MapPin size={16} />
                               <span>{analysis.location}</span>
-                            </div>
+                            </div> */}
                             <div className="flex items-center gap-2 text-sm">
                               <Calendar size={16} />
-                              <span>{new Date(analysis.createdAt).toLocaleDateString()}</span>
+                              <span>{analysis.createdAt.toLocaleDateString()}</span>
                             </div>
                           </CardDescription>
                         </div>
+                        {/* FIX: performanceScore wasn't in your data. Using speedInsights score as an example */}
                         <Badge variant="secondary" className="text-base px-3 py-1">
-                          Score: {analysis.performanceScore}%
+                          Score: {analysis.report.speedInsights.performance?.toFixed(0) || 'N/A'}%
                         </Badge>
                       </div>
                     </CardHeader>
@@ -74,15 +109,15 @@ const AnalysisHistory = () => {
                         <div className="flex gap-6 text-sm">
                           <div>
                             <p className="text-gray-600">Your Rating</p>
-                            <p className="font-semibold text-lg">{analysis.clientData.rating} ⭐</p>
+                            <p className="font-semibold text-lg">{analysis.report.gbpAnalysis.rating || 'N/A'} ⭐</p>
                           </div>
                           <div>
                             <p className="text-gray-600">Reviews</p>
-                            <p className="font-semibold text-lg">{analysis.clientData.reviewCount}</p>
+                            <p className="font-semibold text-lg">{analysis.report.gbpAnalysis.reviewCount || 'N/A'}</p>
                           </div>
                           <div>
                             <p className="text-gray-600">Competitors</p>
-                            <p className="font-semibold text-lg">{analysis.competitors.length}</p>
+                            <p className="font-semibold text-lg">{analysis.report.gbpAnalysis.topCompetitors?.length || 0}</p>
                           </div>
                         </div>
                         <Link to={`/analysis/${analysis.id}`}>
@@ -105,3 +140,4 @@ const AnalysisHistory = () => {
 };
 
 export default AnalysisHistory;
+

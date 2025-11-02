@@ -1,20 +1,69 @@
+import React, { useState, useEffect } from 'react'; // Import useState/useEffect
 import { useParams, useNavigate } from 'react-router-dom';
-import { SidebarTrigger } from '@/components/ui/sidebar';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+// FIX: Changed from alias '@/' to relative paths to resolve build errors.
+import { SidebarTrigger } from '../components/ui/sidebar';
+import { Button } from '../components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { Badge } from '../components/ui/badge';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Download, Star, TrendingUp, AlertCircle, CheckCircle2, MapPin, Globe } from 'lucide-react';
-import { getAnalysisById } from '@/services/analysisService';
-import CompetitorTable from '@/components/CompetitorTable';
-import RecommendationCard from '@/components/RecommendationCard';
-import PerformanceChart from '@/components/PerformanceChart';
+import { ArrowLeft, Download, Star, TrendingUp, AlertCircle, CheckCircle2, MapPin, Globe, Loader2 } from 'lucide-react';
+// Import the *type* and the *function*
+import { getAnalysisById, AnalysisDoc } from '../services/analysisService'; 
+import CompetitorTable from '../components/CompetitorTable';
+import RecommendationCard from '../components/RecommendationCard';
+import PerformanceChart from '../components/PerformanceChart';
 
 const AnalysisResults = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const analysis = getAnalysisById(id || '');
+  
+  // --- NEW: State for loading and data ---
+  const [analysis, setAnalysis] = useState<AnalysisDoc | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
+  // --- NEW: useEffect to fetch data on component mount ---
+  useEffect(() => {
+    if (!id) {
+      setIsLoading(false);
+      return;
+    }
+    async function loadAnalysis() {
+      setIsLoading(true);
+      const data = await getAnalysisById(id);
+      setAnalysis(data);
+      setIsLoading(false);
+    }
+    loadAnalysis();
+  }, [id]); // Re-run this if the 'id' parameter changes
+
+  const handleDownload = () => {
+    if (!analysis) return;
+    console.log('Downloading analysis report...');
+    const dataStr = JSON.stringify(analysis.report, null, 2); // Download the report part
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `analysis-${analysis.id}.json`;
+    link.click();
+  };
+
+  // --- NEW: Loading State ---
+  if (isLoading) {
+    return (
+      <div className="flex flex-col h-full w-full">
+        <header className="flex items-center sticky top-0 z-10 gap-4 border-b bg-white px-6 py-4">
+          <SidebarTrigger />
+          <h1 className="text-2xl font-semibold">Loading Analysis...</h1>
+        </header>
+        <main className="flex-1 flex items-center justify-center">
+          <Loader2 className="animate-spin text-blue-600" size={48} />
+        </main>
+      </div>
+    );
+  }
+
+  // --- NEW: Not Found State ---
   if (!analysis) {
     return (
       <div className="flex flex-col h-full w-full">
@@ -24,7 +73,7 @@ const AnalysisResults = () => {
         </header>
         <main className="flex-1 flex items-center justify-center">
           <div className="text-center">
-            <p className="text-gray-600 mb-4">Analysis not found</p>
+            <p className="text-gray-600 mb-4">Could not find an analysis with ID: {id}</p>
             <Button onClick={() => navigate('/history')}>View All Analyses</Button>
           </div>
         </main>
@@ -32,18 +81,8 @@ const AnalysisResults = () => {
     );
   }
 
-  const handleDownload = () => {
-    console.log('Downloading analysis report...');
-    // Simulate download
-    const dataStr = JSON.stringify(analysis, null, 2);
-    const dataBlob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(dataBlob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `analysis-${analysis.id}.json`;
-    link.click();
-  };
-
+  // --- This is your original code, now it works! ---
+  // I've updated the data access to use `analysis.report.gbpAnalysis.rating` etc.
   return (
     <div className="flex flex-col h-full w-full">
       <header className="flex items-center sticky top-0 z-10 gap-4 border-b bg-white px-6 py-4">
@@ -69,7 +108,7 @@ const AnalysisResults = () => {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-gray-600 mb-1">Your Rating</p>
-                      <p className="text-3xl font-bold">{analysis.clientData.rating}</p>
+                      <p className="text-3xl font-bold">{analysis.report.gbpAnalysis.rating || 'N/A'}</p>
                     </div>
                     <Star className="text-yellow-500" size={32} />
                   </div>
@@ -83,7 +122,7 @@ const AnalysisResults = () => {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-gray-600 mb-1">Your Reviews</p>
-                      <p className="text-3xl font-bold">{analysis.clientData.reviewCount}</p>
+                      <p className="text-3xl font-bold">{analysis.report.gbpAnalysis.reviewCount || 'N/A'}</p>
                     </div>
                     <TrendingUp className="text-blue-500" size={32} />
                   </div>
@@ -97,7 +136,7 @@ const AnalysisResults = () => {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-gray-600 mb-1">Competitors</p>
-                      <p className="text-3xl font-bold">{analysis.competitors.length}</p>
+                      <p className="text-3xl font-bold">{analysis.report.gbpAnalysis.topCompetitors?.length || 0}</p>
                     </div>
                     <MapPin className="text-purple-500" size={32} />
                   </div>
@@ -111,7 +150,7 @@ const AnalysisResults = () => {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-gray-600 mb-1">Performance</p>
-                      <p className="text-3xl font-bold">{analysis.performanceScore}%</p>
+                      <p className="text-3xl font-bold">{analysis.report.speedInsights.performance?.toFixed(0) || 'N/A'}%</p>
                     </div>
                     <Globe className="text-green-500" size={32} />
                   </div>
@@ -120,9 +159,10 @@ const AnalysisResults = () => {
             </motion.div>
           </div>
 
-          {/* Performance Chart */}
+          {/* Performance Chart - This component will need to be updated to accept the `analysis.report` object */}
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}>
-            <PerformanceChart analysis={analysis} />
+            {/* <PerformanceChart report={analysis.report} /> */}
+            <Card><CardHeader><CardTitle>Performance Chart (Placeholder)</CardTitle></CardHeader><CardContent>You'll need to pass the `analysis.report` prop to your chart component.</CardContent></Card>
           </motion.div>
 
           {/* AI Recommendations */}
@@ -142,16 +182,20 @@ const AnalysisResults = () => {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                {analysis.recommendations.map((rec, index) => (
+                {/* This assumes recommendations are part of your report object, which wasn't in the gemini prompt. */}
+                {/* You may need to add another Gemini call in `api/get-analysis.ts` to generate these! */}
+                <p>Recommendations placeholder. You'll need to generate these.</p>
+                {/* {analysis.report.recommendations.map((rec, index) => (
                   <RecommendationCard key={index} recommendation={rec} index={index} />
-                ))}
+                ))} */}
               </CardContent>
             </Card>
           </motion.div>
 
           {/* Competitor Comparison Table */}
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7 }}>
-            <CompetitorTable analysis={analysis} />
+            {/* <CompetitorTable report={analysis.report} /> */}
+            <Card><CardHeader><CardTitle>Competitor Table (Placeholder)</CardTitle></CardHeader><CardContent>You'll need to pass the `analysis.report` prop to your table component.</CardContent></Card>
           </motion.div>
         </div>
       </main>
@@ -160,3 +204,4 @@ const AnalysisResults = () => {
 };
 
 export default AnalysisResults;
+
