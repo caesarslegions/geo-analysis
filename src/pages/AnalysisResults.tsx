@@ -2,17 +2,35 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-// Note: You might need to adjust component paths if they differ
-import { getAnalysisById, AnalysisDoc, GeoReport } from '@/services/analysisService';
+// --- FIX: Use relative paths based on your file structure ---
+import { getAnalysisById, AnalysisDoc, GeoReport } from '../services/analysisService';
 import { ArrowLeft, Download, Star, TrendingUp, AlertCircle, CheckCircle2, MapPin, Globe, Loader2 } from 'lucide-react';
-import CompetitorTable from '@/components/CompetitorTable';
-import RecommendationCard from '@/components/RecommendationCard';
-import PerformanceChart from '@/components/PerformanceChart';
+import CompetitorTable from '../components/ui/CompetitorTable';
+import RecommendationCard from '../components/ui/RecommendationCard';
+import PerformanceChart from '../components/ui/PerformanceChart';
 
 // Helper to get a value safely
 const get = (obj: Record<string, any>, path: string, fallback: any = null) => {
+  if (!obj) return fallback; // Add check for null/undefined obj
   return path.split('.').reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : fallback), obj);
 };
+
+// --- NEW: Helper to render error messages ---
+const ErrorCard = ({ title, error }: { title: string, error: any }) => (
+  <Card className="border-red-500">
+    <CardHeader>
+      <CardTitle className="flex items-center gap-2">
+        <AlertCircle className="text-red-500" />
+        {title} Failed
+      </CardTitle>
+    </CardHeader>
+    <CardContent>
+      <p className="text-red-700">
+        {typeof error === 'string' ? error : (error?.message || "An unknown error occurred.")}
+      </p>
+    </CardContent>
+  </Card>
+);
 
 const AnalysisResults = () => {
   const { id } = useParams<{ id: string }>();
@@ -98,10 +116,12 @@ const AnalysisResults = () => {
 
   // --- Data from the report ---
   const report = analysis.report;
-  const gbp = report.gbpAnalysis;
-  const citations = report.citationAnalysis;
-  const onPage = report.onPageAnalysis;
-  const speed = report.speedInsights;
+  
+  // --- FIX: Safely access report sections ---
+  const gbp = report.gbpAnalysis && !report.gbpAnalysis.error ? report.gbpAnalysis : null;
+  const citations = report.citationAnalysis && !report.citationAnalysis.error ? report.citationAnalysis : null;
+  const onPage = report.onPageAnalysis && !report.onPageAnalysis.error ? report.onPageAnalysis : null;
+  const speed = report.speedInsights && !report.speedInsights.error ? report.speedInsights : null;
 
   // --- Safely get data with fallbacks ---
   const rating = get(gbp, 'rating', 'N/A');
@@ -109,28 +129,28 @@ const AnalysisResults = () => {
   const competitorsCount = get(gbp, 'competitors.length', 0);
   const performanceScore = get(speed, 'performance', 'N/A');
 
-  // --- TODO: You'll need to generate recommendations ---
-  // For now, let's create a placeholder from the on-page analysis
-  const recommendations = [
-    {
+  // --- FIX: Safely generate recommendations ---
+  const recommendations = [];
+  if (onPage) {
+    recommendations.push({
       title: 'Title Tag',
       description: onPage.titleTag ? `Your title tag is: "${onPage.titleTag}"` : "You are missing a title tag.",
       impact: 'High',
       difficulty: 'Easy'
-    },
-    {
+    });
+    recommendations.push({
       title: 'Meta Description',
       description: onPage.metaDescription ? `Your meta description is good.` : "You are missing a meta description. This is important for search rankings.",
       impact: 'High',
       difficulty: 'Easy'
-    },
-    {
+    });
+    recommendations.push({
       title: 'Local Business Schema',
       description: onPage.hasLocalBusinessSchema ? `Great job including schema!` : "You are missing LocalBusiness schema. This helps Google understand your business.",
       impact: 'Medium',
       difficulty: 'Medium'
-    }
-  ];
+    });
+  }
 
   return (
     <div className="flex flex-col h-full w-full">
@@ -200,33 +220,45 @@ const AnalysisResults = () => {
             </Card>
           </div>
 
-          {/* --- FIX: Pass analysis.report to child components --- */}
-          <PerformanceChart analysis={analysis.report} />
+          {/* --- FIX: Pass analysis.report but check for errors first --- */}
+          {speed ? (
+            <PerformanceChart analysis={analysis.report} />
+          ) : (
+            <ErrorCard title="Performance Chart" error={get(analysis, 'report.speedInsights.error', 'Could not load data.')} />
+          )}
 
           {/* AI Recommendations */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-3">
-                <div className="bg-gradient-to-br from-purple-500 to-pink-500 p-2 rounded-lg">
-                  <TrendingUp className="text-white" size={24} />
+          {onPage ? (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="bg-gradient-to-br from-purple-500 to-pink-500 p-2 rounded-lg">
+                    <TrendingUp className="text-white" size={24} />
+                  </div>
+                  <div>
+                    <CardTitle className="text-2xl">AI-Powered Recommendations</CardTitle>
+                    <CardDescription className="text-base">
+                      Prioritized action plan to improve your local SEO performance
+                    </CardDescription>
+                  </div>
                 </div>
-                <div>
-                  <CardTitle className="text-2xl">AI-Powered Recommendations</CardTitle>
-                  <CardDescription className="text-base">
-                    Prioritized action plan to improve your local SEO performance
-                  </CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {recommendations.map((rec, index) => (
-                <RecommendationCard key={index} recommendation={rec} index={index} />
-              ))}
-            </CardContent>
-          </Card>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {recommendations.map((rec, index) => (
+                  <RecommendationCard key={index} recommendation={rec} index={index} />
+                ))}
+              </CardContent>
+            </Card>
+          ) : (
+             <ErrorCard title="AI Recommendations" error={get(analysis, 'report.onPageAnalysis.error', 'Could not load data.')} />
+          )}
 
-          {/* --- FIX: Pass analysis.report to child components --- */}
-          <CompetitorTable analysis={analysis.report} />
+          {/* --- FIX: Pass analysis.report but check for errors first --- */}
+          {gbp ? (
+            <CompetitorTable analysis={analysis.report} />
+          ) : (
+             <ErrorCard title="Competitor Table" error={get(analysis, 'report.gbpAnalysis.error', 'Could not load data.')} />
+          )}
         </div>
       </main>
     </div>
@@ -234,7 +266,5 @@ const AnalysisResults = () => {
 };
 
 export default AnalysisResults;
-
-
 
 
