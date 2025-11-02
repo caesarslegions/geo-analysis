@@ -10,7 +10,7 @@ import {
 } from "firebase/auth";
 import { getFirestore, setLogLevel } from "firebase/firestore";
 
-// --- FIX: Read from Vite's Environment Variables ---
+// --- Read from Vite's Environment Variables ---
 // We will now read from `import.meta.env` which Netlify populates.
 // This removes the need for the `declare const` hacks.
 const appId = import.meta.env.VITE_APP_ID || 'default-app-id';
@@ -63,7 +63,10 @@ const initializeAuth = () => {
           const userCredential = await signInWithCustomToken(auth, __initial_auth_token);
           currentUserId = userCredential.user.uid;
           isAuthReady = true;
-          resolve(userCredential.user.uid);
+          // --- THIS IS THE FIX ---
+          // Was: resolve(userCredential.user.uid)
+          // Now: resolve(userCredential.user)
+          resolve(userCredential.user);
         } catch (error) {
           console.error("Firebase Auth: Error signing in with custom token:", error);
           reject(error);
