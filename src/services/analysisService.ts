@@ -27,6 +27,22 @@ export interface AnalysisDoc {
   report: GeoReport;
 }
 
+// --- FIX: ADDING MISSING INTERFACES ---
+// We add placeholder interfaces to satisfy TypeScript and fix the build.
+// Your components are importing these, so they must be exported.
+export interface Analysis {
+  // Add properties here as needed by your components
+  // For now, just having the type exported will fix the build.
+  [key: string]: any; 
+}
+
+export interface Recommendation {
+  // Add properties here as needed
+  [key: string]: any;
+}
+// --- END OF FIX ---
+
+
 // --- NEW: Helper function to call our multi-task API ---
 /**
  * Calls our /api/get-analysis function for a *single* task.
