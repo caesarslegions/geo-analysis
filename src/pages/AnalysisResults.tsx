@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-// --- FIX: Reverting to the aliased paths your project uses ---
 import { getAnalysisById, AnalysisDoc, GeoReport } from '@/services/analysisService';
 import { ArrowLeft, Download, Star, TrendingUp, AlertCircle, CheckCircle2, MapPin, Globe, Loader2 } from 'lucide-react';
 import CompetitorTable from '@/components/CompetitorTable';
@@ -11,17 +10,17 @@ import PerformanceChart from '@/components/PerformanceChart';
 
 // Helper to get a value safely
 const get = (obj: Record<string, any>, path: string, fallback: any = null) => {
-  if (!obj) return fallback; // Add check for null/undefined obj
+  if (!obj) return fallback;
   return path.split('.').reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : fallback), obj);
 };
 
-// --- NEW: Helper to render error messages ---
+// Helper to render error messages
 const ErrorCard = ({ title, error }: { title: string, error: any }) => (
   <Card className="border-red-500">
     <CardHeader>
       <CardTitle className="flex items-center gap-2">
         <AlertCircle className="text-red-500" />
-        {title} Failed
+        {title} - Data Unavailable
       </CardTitle>
     </CardHeader>
     <CardContent>
@@ -36,12 +35,10 @@ const AnalysisResults = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   
-  // --- NEW: State to hold the fetched analysis ---
   const [analysis, setAnalysis] = useState<AnalysisDoc | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // --- NEW: useEffect to fetch data on mount ---
   useEffect(() => {
     if (!id) {
       setError('No analysis ID provided.');
@@ -68,7 +65,7 @@ const AnalysisResults = () => {
     };
 
     fetchAnalysis();
-  }, [id]); // Re-run if ID changes
+  }, [id]);
 
   const handleDownload = () => {
     if (!analysis) return;
@@ -83,7 +80,6 @@ const AnalysisResults = () => {
     URL.revokeObjectURL(url);
   };
 
-  // --- NEW: Loading and Error states ---
   if (isLoading) {
     return (
       <div className="flex flex-col h-full w-full items-center justify-center p-6">
@@ -114,22 +110,21 @@ const AnalysisResults = () => {
     );
   }
 
-  // --- Data from the report ---
   const report = analysis.report;
   
-  // --- FIX: Safely access report sections ---
+  // CRITICAL FIX: Check for error property, not just existence
   const gbp = report.gbpAnalysis && !report.gbpAnalysis.error ? report.gbpAnalysis : null;
   const citations = report.citationAnalysis && !report.citationAnalysis.error ? report.citationAnalysis : null;
   const onPage = report.onPageAnalysis && !report.onPageAnalysis.error ? report.onPageAnalysis : null;
   const speed = report.speedInsights && !report.speedInsights.error ? report.speedInsights : null;
 
-  // --- Safely get data with fallbacks ---
+  // Safely get data with fallbacks
   const rating = get(gbp, 'rating', 'N/A');
   const reviewCount = get(gbp, 'reviewCount', 'N/A');
   const competitorsCount = get(gbp, 'competitors.length', 0);
   const performanceScore = get(speed, 'performance', 'N/A');
 
-  // --- FIX: Safely generate recommendations ---
+  // Generate recommendations only if onPage data exists
   const recommendations = [];
   if (onPage) {
     recommendations.push({
@@ -155,7 +150,6 @@ const AnalysisResults = () => {
   return (
     <div className="flex flex-col h-full w-full">
       <header className="flex items-center sticky top-0 z-10 gap-4 border-b bg-white px-6 py-4">
-        {/* <SidebarTrigger /> You may need this component from your original layout */}
         <Button variant="ghost" size="sm" onClick={() => navigate('/history')}>
           <ArrowLeft className="mr-2" size={18} />
           Back
@@ -220,15 +214,18 @@ const AnalysisResults = () => {
             </Card>
           </div>
 
-          {/* --- FIX: Pass analysis.report but check for errors first --- */}
+          {/* Performance Chart - Only show if speed data exists */}
           {speed ? (
             <PerformanceChart analysis={analysis.report} />
           ) : (
-            <ErrorCard title="Performance Chart" error={get(analysis, 'report.speedInsights.error', 'Could not load data.')} />
+            <ErrorCard 
+              title="Performance Chart" 
+              error={report.speedInsights?.error || 'Performance data could not be loaded.'} 
+            />
           )}
 
-          {/* AI Recommendations */}
-          {onPage ? (
+          {/* AI Recommendations - Only show if onPage data exists */}
+          {onPage && recommendations.length > 0 ? (
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-3">
@@ -250,14 +247,20 @@ const AnalysisResults = () => {
               </CardContent>
             </Card>
           ) : (
-             <ErrorCard title="AI Recommendations" error={get(analysis, 'report.onPageAnalysis.error', 'Could not load data.')} />
+            <ErrorCard 
+              title="AI Recommendations" 
+              error={report.onPageAnalysis?.error || 'On-page analysis data could not be loaded.'} 
+            />
           )}
 
-          {/* --- FIX: Pass analysis.report but check for errors first --- */}
+          {/* Competitor Table - Only show if GBP data exists */}
           {gbp ? (
             <CompetitorTable analysis={analysis.report} />
           ) : (
-             <ErrorCard title="Competitor Table" error={get(analysis, 'report.gbpAnalysis.error', 'Could not load data.')} />
+            <ErrorCard 
+              title="Competitor Analysis" 
+              error={report.gbpAnalysis?.error || 'Google Business Profile data could not be loaded.'} 
+            />
           )}
         </div>
       </main>
@@ -266,7 +269,3 @@ const AnalysisResults = () => {
 };
 
 export default AnalysisResults;
-
-
-
-
