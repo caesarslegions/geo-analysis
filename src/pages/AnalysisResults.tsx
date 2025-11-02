@@ -200,8 +200,8 @@ const AnalysisResults = () => {
             </Card>
           </div>
 
-          {/* Performance Chart - This now receives the real 'analysis' prop */}
-          <PerformanceChart analysis={analysis} />
+          {/* --- FIX: Pass analysis.report to child components --- */}
+          <PerformanceChart analysis={analysis.report} />
 
           {/* AI Recommendations */}
           <Card>
@@ -225,8 +225,8 @@ const AnalysisResults = () => {
             </CardContent>
           </Card>
 
-          {/* Competitor Comparison Table - This now receives the real 'analysis' prop */}
-          <CompetitorTable analysis={analysis} />
+          {/* --- FIX: Pass analysis.report to child components --- */}
+          <CompetitorTable analysis={analysis.report} />
         </div>
       </main>
     </div>
@@ -234,5 +234,7 @@ const AnalysisResults = () => {
 };
 
 export default AnalysisResults;
+
+
 
 
