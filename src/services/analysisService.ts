@@ -37,8 +37,10 @@ export interface Analysis {
 }
 
 export interface Recommendation {
-  // Add properties here as needed
-  [key: string]: any;
+  title: string;
+  description: string;
+  impact: string;      // 'High', 'Medium', 'Low'
+  difficulty: string;  // 'Easy', 'Medium', 'Hard'
 }
 // --- END OF FIX ---
 
