@@ -43,11 +43,19 @@ export default async function handler(request: Request) {
 
   /**
    * Google Places API: Text Search
+   * DEBUG VERSION - Will log detailed error info
    */
   async function placesTextSearch(query: string): Promise<any[]> {
     const url = 'https://places.googleapis.com/v1/places:searchText';
     
     try {
+      console.log('[DEBUG] Making Places API request:', {
+        url,
+        query,
+        hasApiKey: !!googlePlacesApiKey,
+        apiKeyLength: googlePlacesApiKey?.length
+      });
+
       const response = await withTimeout(
         fetch(url, {
           method: 'POST',
@@ -65,15 +73,27 @@ export default async function handler(request: Request) {
         'Google Places API timeout'
       );
 
+      console.log('[DEBUG] Places API response status:', response.status);
+
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`Places API failed: ${error.error?.message || response.statusText}`);
+        const errorText = await response.text();
+        console.error('[DEBUG] Places API error response:', errorText);
+        let error;
+        try {
+          error = JSON.parse(errorText);
+        } catch (e) {
+          error = { message: errorText };
+        }
+        throw new Error(`Places API failed (${response.status}): ${error.error?.message || error.message || response.statusText}`);
       }
 
       const data = await response.json();
+      console.log('[DEBUG] Places API success:', {
+        placesFound: data.places?.length || 0
+      });
       return data.places || [];
     } catch (error: any) {
-      console.error('Error in placesTextSearch:', error);
+      console.error('[DEBUG] Error in placesTextSearch:', error.message);
       throw error;
     }
   }
