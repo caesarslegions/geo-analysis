@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { getAnalysisById, AnalysisDoc, GeoReport } from '@/services/analysisService';
-import { ArrowLeft, Download, Star, TrendingUp, AlertCircle, CheckCircle2, MapPin, Globe, Loader2 } from 'lucide-react';
+import { ArrowLeft, Download, Star, TrendingUp, AlertCircle, MapPin, Globe, Loader2 } from 'lucide-react';
 import CompetitorTable from '@/components/CompetitorTable';
 import RecommendationCard from '@/components/RecommendationCard';
 import LocalSEOScoreCard from '@/components/LocalSEOScoreCard';
@@ -113,11 +113,10 @@ const AnalysisResults = () => {
 
   const report = analysis.report;
   
-  // CRITICAL FIX: Check for error property, not just existence
+  // Check for error property, not just existence
   const gbp = report.gbpAnalysis && !report.gbpAnalysis.error ? report.gbpAnalysis : null;
   const citations = report.citationAnalysis && !report.citationAnalysis.error ? report.citationAnalysis : null;
   const onPage = report.onPageAnalysis && !report.onPageAnalysis.error ? report.onPageAnalysis : null;
-  const speed = report.speedInsights && !report.speedInsights.error ? report.speedInsights : null;
 
   // Safely get data with fallbacks
   const rating = get(gbp, 'rating', 'N/A');
@@ -129,12 +128,10 @@ const AnalysisResults = () => {
     if (!onPage && !gbp && !citations) return 'N/A';
     
     let score = 0;
-    let checks = 0;
     
     // Quick calculation based on available data
     if (gbp?.rating) {
       score += (gbp.rating / 5) * 25;
-      checks++;
     }
     if (onPage?.hasLocalBusinessSchema) score += 25;
     if (onPage?.titleTag) score += 15;
@@ -146,28 +143,8 @@ const AnalysisResults = () => {
 
   const localSEOScore = calculateQuickScore();
 
-  // Generate recommendations only if onPage data exists
-  const recommendations = [];
-  if (onPage) {
-    recommendations.push({
-      title: 'Title Tag',
-      description: onPage.titleTag ? `Your title tag is: "${onPage.titleTag}"` : "You are missing a title tag.",
-      impact: 'High',
-      difficulty: 'Easy'
-    });
-    recommendations.push({
-      title: 'Meta Description',
-      description: onPage.metaDescription ? `Your meta description is good.` : "You are missing a meta description. This is important for search rankings.",
-      impact: 'High',
-      difficulty: 'Easy'
-    });
-    recommendations.push({
-      title: 'Local Business Schema',
-      description: onPage.hasLocalBusinessSchema ? `Great job including schema!` : "You are missing LocalBusiness schema. This helps Google understand your business.",
-      impact: 'Medium',
-      difficulty: 'Medium'
-    });
-  }
+  // Generate smart recommendations using the recommendation engine
+  const recommendations = generateSmartRecommendations(report);
 
   return (
     <div className="flex flex-col h-full w-full">
@@ -239,8 +216,8 @@ const AnalysisResults = () => {
           {/* Local SEO Score Card - Always show, uses all available data */}
           <LocalSEOScoreCard report={analysis.report} />
 
-          {/* AI Recommendations - Only show if onPage data exists */}
-          {onPage && recommendations.length > 0 ? (
+          {/* AI Recommendations - Always show, uses smart analysis */}
+          {recommendations.length > 0 ? (
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-3">
@@ -250,7 +227,7 @@ const AnalysisResults = () => {
                   <div>
                     <CardTitle className="text-2xl">AI-Powered Recommendations</CardTitle>
                     <CardDescription className="text-base">
-                      Prioritized action plan to improve your local SEO performance
+                      Prioritized action plan based on your competitive analysis
                     </CardDescription>
                   </div>
                 </div>
@@ -262,10 +239,19 @@ const AnalysisResults = () => {
               </CardContent>
             </Card>
           ) : (
-            <ErrorCard 
-              title="AI Recommendations" 
-              error={report.onPageAnalysis?.error || 'On-page analysis data could not be loaded.'} 
-            />
+            <Card className="border-yellow-500">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <AlertCircle className="text-yellow-500" />
+                  Recommendations Unavailable
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-gray-700">
+                  Unable to generate recommendations due to missing data. Run a new analysis to get personalized recommendations.
+                </p>
+              </CardContent>
+            </Card>
           )}
 
           {/* Competitor Table - Only show if GBP data exists */}
