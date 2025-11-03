@@ -1,5 +1,5 @@
-// --- REFACTORED: Deterministic data collection with objective APIs ---
-// No more AI for data extraction! AI only for recommendations (later).
+// --- REFACTORED: Deterministic data collection with rate limiting ---
+// Optimized for Netlify's 10-second timeout limit
 
 export default async function handler(request: Request) {
   if (request.method !== 'POST') {
@@ -9,7 +9,6 @@ export default async function handler(request: Request) {
     });
   }
 
-  // Get API keys from environment variables
   const googlePlacesApiKey = process.env.GOOGLE_PLACES_API_KEY;
   const psiApiKey = process.env.PSI_API_KEY;
 
@@ -29,32 +28,45 @@ export default async function handler(request: Request) {
     });
   }
 
+  // --- HELPER: Add delay between requests ---
+  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  // --- HELPER: Timeout wrapper ---
+  async function withTimeout<T>(promise: Promise<T>, ms: number, errorMsg: string): Promise<T> {
+    const timeout = new Promise<T>((_, reject) => 
+      setTimeout(() => reject(new Error(errorMsg)), ms)
+    );
+    return Promise.race([promise, timeout]);
+  }
+
   // --- HELPER FUNCTIONS ---
 
   /**
    * Google Places API: Text Search
-   * Finds businesses matching a query
    */
   async function placesTextSearch(query: string): Promise<any[]> {
     const url = 'https://places.googleapis.com/v1/places:searchText';
     
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': googlePlacesApiKey,
-          'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.id'
-        },
-        body: JSON.stringify({
-          textQuery: query,
-          maxResultCount: 5 // Get top 5 results
-        })
-      });
+      const response = await withTimeout(
+        fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': googlePlacesApiKey,
+            'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.id'
+          },
+          body: JSON.stringify({
+            textQuery: query,
+            maxResultCount: 5
+          })
+        }),
+        8000, // 8 second timeout for Places API
+        'Google Places API timeout'
+      );
 
       if (!response.ok) {
         const error = await response.json();
-        console.error('Places API error:', error);
         throw new Error(`Places API failed: ${error.error?.message || response.statusText}`);
       }
 
@@ -67,8 +79,7 @@ export default async function handler(request: Request) {
   }
 
   /**
-   * Parse HTML to extract SEO elements
-   * Uses native DOM parsing (works in Netlify Edge runtime)
+   * Parse HTML for SEO elements
    */
   function parseHtmlForSeo(html: string, businessName: string, fullAddress: string): Record<string, any> {
     try {
@@ -104,10 +115,9 @@ export default async function handler(request: Request) {
       const metaLower = (metaDescription || '').toLowerCase();
       const locationInMetaDescription = cityName ? metaLower.includes(cityName) : false;
 
-      // Simple NAP detection (address and phone)
+      // Simple NAP detection
       const addressPresent = html.toLowerCase().includes(fullAddress.split(',')[0].toLowerCase());
       
-      // Phone number patterns: (123) 456-7890, 123-456-7890, 123.456.7890
       const phonePattern = /(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/;
       const phoneNumberPresent = phonePattern.test(html);
 
@@ -134,12 +144,16 @@ export default async function handler(request: Request) {
   async function fetchWebsiteHtml(url: string): Promise<string> {
     console.log(`Fetching HTML for: ${url}`);
     try {
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'text/html'
-        }
-      });
+      const response = await withTimeout(
+        fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html'
+          }
+        }),
+        7000, // 7 second timeout
+        'Website fetch timeout'
+      );
 
       if (!response.ok) {
         throw new Error(`Failed to fetch website (${response.status})`);
@@ -152,7 +166,7 @@ export default async function handler(request: Request) {
   }
 
   /**
-   * Check if business exists on a directory and verify NAP
+   * Check citation with timeout and rate limiting
    */
   async function checkCitation(
     platform: 'yelp' | 'foursquare' | 'yellowpages',
@@ -167,16 +181,19 @@ export default async function handler(request: Request) {
     };
 
     try {
-      // Use Google to search for the business on each platform
-      // This is a simple approach - in production you might use their APIs
       const searchQuery = searchQueries[platform];
       const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`;
       
-      const response = await fetch(searchUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
+      // Fetch search results with timeout
+      const response = await withTimeout(
+        fetch(searchUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        }),
+        3000, // 3 second timeout per search
+        `${platform} search timeout`
+      );
 
       if (!response.ok) {
         return { found: false, url: null, napMatch: false };
@@ -184,7 +201,7 @@ export default async function handler(request: Request) {
 
       const html = await response.text();
       
-      // Extract first result URL
+      // Extract URL from search results
       const platformDomains: Record<string, string> = {
         yelp: 'yelp.com/biz/',
         foursquare: 'foursquare.com/v/',
@@ -198,26 +215,35 @@ export default async function handler(request: Request) {
         return { found: false, url: null, napMatch: false };
       }
 
-      const foundUrl = urlMatch[0].split('&')[0]; // Clean up URL
+      const foundUrl = urlMatch[0].split('&')[0];
 
-      // Fetch the listing page to verify NAP
-      const listingResponse = await fetch(foundUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      // Quick NAP check on listing page
+      try {
+        const listingResponse = await withTimeout(
+          fetch(foundUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+          }),
+          3000, // 3 second timeout per listing fetch
+          `${platform} listing fetch timeout`
+        );
+
+        if (!listingResponse.ok) {
+          return { found: true, url: foundUrl, napMatch: false };
         }
-      });
 
-      if (!listingResponse.ok) {
+        const listingHtml = await listingResponse.text();
+        const addressStreet = address.split(',')[0].toLowerCase();
+        const napMatch = listingHtml.toLowerCase().includes(addressStreet);
+
+        return { found: true, url: foundUrl, napMatch };
+
+      } catch (listingError) {
+        // If listing fetch fails, still return that we found the URL
+        console.log(`Could not verify NAP for ${platform}:`, listingError);
         return { found: true, url: foundUrl, napMatch: false };
       }
-
-      const listingHtml = await listingResponse.text();
-      
-      // Simple NAP check - does the page contain the address street?
-      const addressStreet = address.split(',')[0].toLowerCase();
-      const napMatch = listingHtml.toLowerCase().includes(addressStreet);
-
-      return { found: true, url: foundUrl, napMatch };
 
     } catch (error: any) {
       console.error(`Error checking ${platform}:`, error);
@@ -235,15 +261,12 @@ export default async function handler(request: Request) {
       psiApiUrl += `&key=${psiApiKey}`;
     }
 
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error("PageSpeed Insights timed out after 15 seconds")), 15000);
-    });
-
     try {
-      const response = await Promise.race([
+      const response = await withTimeout(
         fetch(psiApiUrl),
-        timeoutPromise
-      ]) as Response;
+        9000, // 9 second timeout (leave 1s buffer for Netlify)
+        'PageSpeed Insights timeout'
+      );
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -271,7 +294,6 @@ export default async function handler(request: Request) {
 
   async function analyzeGbp(businessName: string, fullAddress: string): Promise<Record<string, any>> {
     try {
-      // Search for the business
       const query = `${businessName} ${fullAddress}`;
       const places = await placesTextSearch(query);
 
@@ -286,10 +308,7 @@ export default async function handler(request: Request) {
         };
       }
 
-      // First result should be the target business
       const business = places[0];
-      
-      // Rest are competitors (if any)
       const competitors = places.slice(1, 4).map((place: any) => ({
         name: place.displayName?.text || 'Unknown',
         rating: place.rating || 0,
@@ -319,12 +338,14 @@ export default async function handler(request: Request) {
 
   async function analyzeCitations(businessName: string, fullAddress: string): Promise<Record<string, any>> {
     try {
-      // Check all three platforms in parallel
-      const [yelp, foursquare, yellowPages] = await Promise.all([
-        checkCitation('yelp', businessName, fullAddress),
-        checkCitation('foursquare', businessName, fullAddress),
-        checkCitation('yellowpages', businessName, fullAddress)
-      ]);
+      // Check citations sequentially with small delays to avoid rate limits
+      const yelp = await checkCitation('yelp', businessName, fullAddress);
+      await delay(500); // 500ms delay
+      
+      const foursquare = await checkCitation('foursquare', businessName, fullAddress);
+      await delay(500); // 500ms delay
+      
+      const yellowPages = await checkCitation('yellowpages', businessName, fullAddress);
 
       return {
         yelp,
