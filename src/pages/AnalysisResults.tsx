@@ -7,6 +7,7 @@ import { ArrowLeft, Download, Star, TrendingUp, AlertCircle, MapPin, Globe, Load
 import CompetitorTable from '@/components/CompetitorTable';
 import RecommendationCard from '@/components/RecommendationCard';
 import LocalSEOScoreCard from '@/components/LocalSEOScoreCard';
+import CitationsDisplay from '@/components/CitationsDisplay';
 import { generateSmartRecommendations } from '@/lib/recommendationEngine';
 
 // Helper to get a value safely
@@ -215,7 +216,8 @@ const AnalysisResults = () => {
 
           {/* Local SEO Score Card - Always show, uses all available data */}
           <LocalSEOScoreCard report={analysis.report} />
-
+          <CitationsDisplay analysis={report} />
+          <CompetitorTable analysis={report} />
           {/* AI Recommendations - Always show, uses smart analysis */}
           {recommendations.length > 0 ? (
             <Card>

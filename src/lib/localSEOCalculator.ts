@@ -1,6 +1,6 @@
 import { GeoReport } from '@/services/analysisService';
 
-export interface SEOScoreBreakdown {
+interface ScoreData {
   overall: number;
   categories: {
     gbpOptimization: { score: number; maxScore: number; weight: number };
@@ -11,201 +11,218 @@ export interface SEOScoreBreakdown {
   recommendations: string[];
 }
 
-/**
- * Calculates a comprehensive Local SEO Score (0-100)
- * based on the report data
- */
-export function calculateLocalSEOScore(report: GeoReport): SEOScoreBreakdown {
+export function calculateLocalSEOScore(report: GeoReport): ScoreData {
   const recommendations: string[] = [];
   
-  // ========== 1. GBP OPTIMIZATION (30% weight) ==========
+  // --- CATEGORY WEIGHTS ---
+  const weights = {
+    gbpOptimization: 0.30,    // 30%
+    citationPresence: 0.25,   // 25%
+    onPageSEO: 0.30,          // 30%
+    napConsistency: 0.15      // 15%
+  };
+
+  // --- 1. GOOGLE BUSINESS PROFILE OPTIMIZATION (30 points max) ---
   let gbpScore = 0;
-  const gbpMaxScore = 100;
-  const gbp = report.gbpAnalysis;
-  
-  if (gbp && !gbp.error) {
-    // Rating quality (40 points)
-    if (gbp.rating) {
-      const ratingScore = (gbp.rating / 5.0) * 40;
-      gbpScore += ratingScore;
-      
+  const gbpMax = 30;
+
+  if (report.gbpAnalysis && !report.gbpAnalysis.error) {
+    const gbp = report.gbpAnalysis;
+    
+    // Has a rating (5 points)
+    if (gbp.rating && gbp.rating > 0) {
+      gbpScore += 5;
+    } else {
+      recommendations.push("Could not fetch Google Business Profile data. Ensure your business is claimed on Google.");
+    }
+    
+    // Rating quality (10 points: proportional to rating out of 5)
+    if (gbp.rating && gbp.rating > 0) {
+      gbpScore += (gbp.rating / 5) * 10;
       if (gbp.rating < 4.0) {
-        recommendations.push(`Your rating (${gbp.rating}) is below 4.0. Focus on improving customer satisfaction and requesting reviews from happy customers.`);
+        recommendations.push(`Your Google rating is ${gbp.rating}. Focus on improving customer experience to boost reviews.`);
       }
     }
     
-    // Review count (40 points)
-    if (gbp.reviewCount) {
-      // Scoring: 0-50 reviews = 0-20 pts, 50-100 = 20-30 pts, 100-200 = 30-40 pts, 200+ = 40 pts
-      let reviewScore = 0;
-      if (gbp.reviewCount >= 200) reviewScore = 40;
-      else if (gbp.reviewCount >= 100) reviewScore = 30 + ((gbp.reviewCount - 100) / 100) * 10;
-      else if (gbp.reviewCount >= 50) reviewScore = 20 + ((gbp.reviewCount - 50) / 50) * 10;
-      else reviewScore = (gbp.reviewCount / 50) * 20;
-      
-      gbpScore += reviewScore;
-      
-      if (gbp.reviewCount < 50) {
-        recommendations.push(`You only have ${gbp.reviewCount} reviews. Aim for at least 50+ reviews to compete effectively.`);
-      }
-    }
-    
-    // Has business name (20 points)
-    if (gbp.name) {
-      gbpScore += 20;
+    // Has reviews (5 points for having any, +5 for 50+, +5 for 100+)
+    if (gbp.reviewCount > 0) {
+      gbpScore += 5;
+      if (gbp.reviewCount >= 50) gbpScore += 5;
+      if (gbp.reviewCount >= 100) gbpScore += 5;
+    } else {
+      recommendations.push("You have very few Google reviews. Encourage satisfied customers to leave reviews.");
     }
   } else {
-    recommendations.push('Could not fetch Google Business Profile data. Ensure your business is claimed on Google.');
+    recommendations.push("Could not fetch Google Business Profile data. Ensure your business is claimed on Google.");
   }
-  
-  // ========== 2. CITATION PRESENCE (25% weight) ==========
+
+  // --- 2. CITATION PRESENCE (25 points max) ---
   let citationScore = 0;
-  const citationMaxScore = 100;
-  const citations = report.citationAnalysis;
+  const citationMax = 25;
   
-  if (citations && !citations.error) {
-    const platforms = ['yelp', 'foursquare', 'yellowPages'];
-    let found = 0;
-    let napMatches = 0;
+  if (report.citationAnalysis) {
+    const citations = report.citationAnalysis;
+    const sources = ['yelp', 'foursquare', 'yellowPages', 'bbb', 'appleMaps', 'bingPlaces'];
     
-    platforms.forEach(platform => {
-      if (citations[platform]?.found) {
-        found++;
-        if (citations[platform]?.napMatch) {
-          napMatches++;
-        }
-      }
+    // Count how many are found (excluding ones with API key notes)
+    const foundSources = sources.filter(source => {
+      const data = (citations as any)[source];
+      return data?.found === true;
     });
     
-    // 60 points for being present on platforms
-    citationScore += (found / platforms.length) * 60;
+    const pendingSources = sources.filter(source => {
+      const data = (citations as any)[source];
+      return data?.note; // Has a "pending API key" note
+    });
     
-    // 40 points for NAP consistency
-    if (found > 0) {
-      citationScore += (napMatches / found) * 40;
+    const missingSources = sources.filter(source => {
+      const data = (citations as any)[source];
+      return !data?.found && !data?.note;
+    });
+
+    // Score: ~4 points per found citation
+    citationScore = (foundSources.length / sources.length) * citationMax;
+    
+    // Add recommendations for missing citations
+    if (missingSources.length > 0) {
+      const missingNames = missingSources.map(s => {
+        const names: Record<string, string> = {
+          yelp: 'Yelp',
+          foursquare: 'Foursquare',
+          yellowPages: 'Yellow Pages',
+          bbb: 'Better Business Bureau',
+          appleMaps: 'Apple Maps',
+          bingPlaces: 'Bing Places'
+        };
+        return names[s];
+      }).join(', ');
+      
+      recommendations.push(`Your business is not listed on: ${missingNames}. Add your business to these directories.`);
     }
     
-    if (found < platforms.length) {
-      const missing = platforms.filter(p => !citations[p]?.found);
-      recommendations.push(`Your business is not listed on: ${missing.map(m => m.charAt(0).toUpperCase() + m.slice(1)).join(', ')}. Add your business to these directories.`);
+    // Note pending sources (but don't penalize)
+    if (pendingSources.length > 0 && foundSources.length === 0) {
+      recommendations.push("Citation data will be more accurate once all API integrations are complete.");
     }
-    
-    if (napMatches < found) {
-      recommendations.push('NAP (Name, Address, Phone) inconsistencies detected across directories. Ensure all listings have identical information.');
-    }
-  } else {
-    recommendations.push('Citation analysis failed. Unable to check directory listings.');
   }
-  
-  // ========== 3. ON-PAGE SEO (30% weight) ==========
+
+  // --- 3. ON-PAGE SEO (30 points max) ---
   let onPageScore = 0;
-  const onPageMaxScore = 100;
-  const onPage = report.onPageAnalysis;
-  
-  if (onPage && !onPage.error) {
-    // Title tag with local keywords (25 points)
+  const onPageMax = 30;
+
+  if (report.onPageAnalysis && !report.onPageAnalysis.error) {
+    const onPage = report.onPageAnalysis;
+    
+    // Has title tag (3 points)
     if (onPage.titleTag) {
-      onPageScore += 15; // Has title
-      if (onPage.localKeywordsInTitle || onPage.cityInTitle) {
-        onPageScore += 10; // Has local keywords
-      } else {
-        recommendations.push('Add your city/location to your page title for better local SEO.');
-      }
+      onPageScore += 3;
     } else {
-      recommendations.push('Missing title tag - this is critical for SEO!');
+      recommendations.push("Add a title tag to your homepage.");
     }
     
-    // Meta description (15 points)
-    if (onPage.metaDescription && onPage.metaDescription.trim().length > 50) {
-      onPageScore += 15;
+    // Has meta description (3 points)
+    if (onPage.metaDescription) {
+      onPageScore += 3;
     } else {
-      recommendations.push('Add or improve your meta description to increase click-through rates from search results.');
+      recommendations.push("Add a meta description to your homepage.");
     }
     
-    // H1 tag (15 points)
-    if (onPage.h1Content && onPage.h1Content.trim().length > 0) {
-      onPageScore += 15;
+    // Has H1 tag (3 points)
+    if (onPage.h1Tag) {
+      onPageScore += 3;
     } else {
-      recommendations.push('Add an H1 heading tag to your page for better SEO structure.');
+      recommendations.push("Add an H1 heading tag to your page for better SEO structure.");
     }
     
-    // LocalBusiness Schema (25 points) - SUPER IMPORTANT
+    // Has LocalBusiness schema (5 points - important!)
     if (onPage.hasLocalBusinessSchema) {
-      onPageScore += 25;
+      onPageScore += 5;
     } else {
-      recommendations.push('Add LocalBusiness schema markup - this helps Google understand your business details.');
+      recommendations.push("Add LocalBusiness schema markup to your website for better local SEO.");
     }
     
-    // Contact info visible on page (20 points)
-    let contactScore = 0;
-    if (onPage.addressFound || onPage.addressPresentInHtml) contactScore += 10;
-    else recommendations.push('Display your business address prominently on your website.');
+    // Location in title (4 points)
+    if (onPage.localKeywordsInTitle) {
+      onPageScore += 4;
+    } else {
+      recommendations.push("Include your city/location in your homepage title tag.");
+    }
     
-    if (onPage.phoneNumberFound || onPage.phonePresentInHtml) contactScore += 10;
-    else recommendations.push('Display your phone number prominently on your website.');
+    // Address present (4 points)
+    if (onPage.addressPresent) {
+      onPageScore += 4;
+    } else {
+      recommendations.push("Display your business address prominently on your website.");
+    }
     
-    onPageScore += contactScore;
+    // Phone present (4 points)
+    if (onPage.phoneNumberPresent) {
+      onPageScore += 4;
+    } else {
+      recommendations.push("Display your phone number prominently on your website.");
+    }
+    
+    // Location in H1 (2 points)
+    if (onPage.locationInH1) {
+      onPageScore += 2;
+    }
+    
+    // Location in meta description (2 points)
+    if (onPage.locationInMetaDescription) {
+      onPageScore += 2;
+    }
   } else {
-    recommendations.push('On-page analysis failed. Unable to analyze website SEO elements.');
+    recommendations.push("Could not analyze your website. Ensure your website URL is correct and accessible.");
   }
-  
-  // ========== 4. NAP CONSISTENCY (15% weight) ==========
+
+  // --- 4. NAP CONSISTENCY (15 points max) ---
   let napScore = 0;
-  const napMaxScore = 100;
-  
-  // This is based on citation analysis NAP matching
-  if (citations && !citations.error) {
-    const platforms = ['yelp', 'foursquare', 'yellowPages'];
-    const found = platforms.filter(p => citations[p]?.found).length;
-    const matched = platforms.filter(p => citations[p]?.napMatch).length;
+  const napMax = 15;
+
+  if (report.citationAnalysis) {
+    const citations = report.citationAnalysis;
+    const sources = ['yelp', 'foursquare', 'yellowPages', 'bbb'];
     
-    if (found > 0) {
-      napScore = (matched / found) * 100;
-    }
+    const foundWithNAP = sources.filter(source => {
+      const data = (citations as any)[source];
+      return data?.found === true;
+    });
     
-    if (napScore < 100 && napScore > 0) {
-      recommendations.push('Ensure your business Name, Address, and Phone are identical across all online directories.');
+    const consistentNAP = foundWithNAP.filter(source => {
+      const data = (citations as any)[source];
+      return data?.napMatch === true;
+    });
+
+    if (foundWithNAP.length > 0) {
+      napScore = (consistentNAP.length / foundWithNAP.length) * napMax;
+      
+      if (consistentNAP.length < foundWithNAP.length) {
+        recommendations.push("NAP (Name, Address, Phone) inconsistencies detected across directories. Ensure consistent business information everywhere.");
+      }
     }
   }
-  
-  // ========== CALCULATE WEIGHTED OVERALL SCORE ==========
-  const weights = {
-    gbpOptimization: 0.30,
-    citationPresence: 0.25,
-    onPageSEO: 0.30,
-    napConsistency: 0.15
+
+  // --- CALCULATE OVERALL SCORE ---
+  const categories = {
+    gbpOptimization: { score: Math.round(gbpScore), maxScore: gbpMax, weight: weights.gbpOptimization },
+    citationPresence: { score: Math.round(citationScore), maxScore: citationMax, weight: weights.citationPresence },
+    onPageSEO: { score: Math.round(onPageScore), maxScore: onPageMax, weight: weights.onPageSEO },
+    napConsistency: { score: Math.round(napScore), maxScore: napMax, weight: weights.napConsistency }
   };
-  
-  const weightedScore = 
-    (gbpScore / gbpMaxScore) * 100 * weights.gbpOptimization +
-    (citationScore / citationMaxScore) * 100 * weights.citationPresence +
-    (onPageScore / onPageMaxScore) * 100 * weights.onPageSEO +
-    (napScore / napMaxScore) * 100 * weights.napConsistency;
-  
+
+  const overall = Math.round(
+    (gbpScore / gbpMax) * 100 * weights.gbpOptimization +
+    (citationScore / citationMax) * 100 * weights.citationPresence +
+    (onPageScore / onPageMax) * 100 * weights.onPageSEO +
+    (napScore / napMax) * 100 * weights.napConsistency
+  );
+
+  // Return top 5 recommendations
+  const topRecommendations = recommendations.slice(0, 5);
+
   return {
-    overall: Math.round(weightedScore),
-    categories: {
-      gbpOptimization: { 
-        score: Math.round(gbpScore), 
-        maxScore: gbpMaxScore, 
-        weight: weights.gbpOptimization 
-      },
-      citationPresence: { 
-        score: Math.round(citationScore), 
-        maxScore: citationMaxScore, 
-        weight: weights.citationPresence 
-      },
-      onPageSEO: { 
-        score: Math.round(onPageScore), 
-        maxScore: onPageMaxScore, 
-        weight: weights.onPageSEO 
-      },
-      napConsistency: { 
-        score: Math.round(napScore), 
-        maxScore: napMaxScore, 
-        weight: weights.napConsistency 
-      }
-    },
-    recommendations: recommendations.slice(0, 5) // Top 5 most important
+    overall,
+    categories,
+    recommendations: topRecommendations
   };
 }
