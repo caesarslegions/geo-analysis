@@ -1,9 +1,7 @@
-// --- This is your "doorman" serverless function ---
-// It now handles specific tasks based on a 'type' parameter.
+// --- REFACTORED: Deterministic data collection with objective APIs ---
+// No more AI for data extraction! AI only for recommendations (later).
 
-// The 'Request' object is globally available in this environment.
 export default async function handler(request: Request) {
-  // Only allow POST requests
   if (request.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
@@ -11,18 +9,17 @@ export default async function handler(request: Request) {
     });
   }
 
-  // Get the secret API keys from Netlify's environment variables
-  const geminiApiKey = process.env.GEMINI_API_KEY;
+  // Get API keys from environment variables
+  const googlePlacesApiKey = process.env.GOOGLE_PLACES_API_KEY;
   const psiApiKey = process.env.PSI_API_KEY;
 
-  if (!geminiApiKey) {
-    return new Response(JSON.stringify({ error: 'Gemini API key is not set' }), {
+  if (!googlePlacesApiKey) {
+    return new Response(JSON.stringify({ error: 'Google Places API key is not set' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     });
   }
 
-  // Get the data from the React app's request
   const { businessName, fullAddress, websiteUrl, type } = await request.json();
 
   if (!businessName || !fullAddress || !websiteUrl || !type) {
@@ -32,189 +29,350 @@ export default async function handler(request: Request) {
     });
   }
 
-  // --- API CALLING LOGIC ---
-  const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${geminiApiKey}`;
-  
-  const extractJson = (text: string): any => {
-    try {
-      return JSON.parse(text);
-    } catch (e) {
-      const jsonMatch = text.match(/```(json)?\s*([\s\S]*?)\s*```/);
-      if (jsonMatch && jsonMatch[2]) {
-        try {
-          return JSON.parse(jsonMatch[2]);
-        } catch (e2) {
-          console.error("Failed to parse JSON from markdown block:", e2);
-          throw new Error("Could not extract JSON from Gemini response.");
-        }
-      }
-      console.error("Gemini response was not valid JSON:", text);
-      throw new Error("Gemini response was not valid JSON.");
-    }
-  };
+  // --- HELPER FUNCTIONS ---
 
-  async function callGeminiApi(payload: Record<string, any>, retries = 3, delay = 1000): Promise<any> {
+  /**
+   * Google Places API: Text Search
+   * Finds businesses matching a query
+   */
+  async function placesTextSearch(query: string): Promise<any[]> {
+    const url = 'https://places.googleapis.com/v1/places:searchText';
+    
     try {
-      const response = await fetch(geminiApiUrl, {
+      const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': googlePlacesApiKey,
+          'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.id'
+        },
+        body: JSON.stringify({
+          textQuery: query,
+          maxResultCount: 5 // Get top 5 results
+        })
       });
 
       if (!response.ok) {
-        if (response.status === 429 && retries > 0) {
-          console.warn(`Gemini API rate limit hit. Retrying in ${delay}ms...`);
-          await new Promise(res => setTimeout(res, delay));
-          return callGeminiApi(payload, retries - 1, delay * 2);
-        }
-        const errorText = await response.text();
-        console.error(`API call failed with status ${response.status}: ${errorText}`);
-        throw new Error(`API call failed with status ${response.status}: ${errorText}`);
+        const error = await response.json();
+        console.error('Places API error:', error);
+        throw new Error(`Places API failed: ${error.error?.message || response.statusText}`);
       }
 
-      const result = await response.json();
-      const candidate = result.candidates?.[0];
-      const contentPart = candidate?.content?.parts?.[0];
-
-      if (contentPart?.text) {
-        return extractJson(contentPart.text);
-      } else {
-        console.error('Invalid response structure from Gemini API:', JSON.stringify(result, null, 2));
-        throw new Error('Invalid response structure from Gemini API.');
-      }
+      const data = await response.json();
+      return data.places || [];
     } catch (error: any) {
-      console.error('Error in callGeminiApi:', error.message);
+      console.error('Error in placesTextSearch:', error);
       throw error;
     }
   }
 
-  async function fetchWebsiteHtml(websiteUrl: string): Promise<string> {
-    console.log(`Fetching HTML for: ${websiteUrl}`);
+  /**
+   * Parse HTML to extract SEO elements
+   * Uses native DOM parsing (works in Netlify Edge runtime)
+   */
+  function parseHtmlForSeo(html: string, businessName: string, fullAddress: string): Record<string, any> {
     try {
-      const response = await fetch(websiteUrl, {
+      // Extract title tag
+      const titleMatch = html.match(/<title[^>]*>(.*?)<\/title>/i);
+      const titleTag = titleMatch ? titleMatch[1].trim() : null;
+
+      // Extract meta description
+      const metaDescMatch = html.match(/<meta\s+name=["']description["']\s+content=["']([^"']*)["']/i);
+      const metaDescription = metaDescMatch ? metaDescMatch[1].trim() : null;
+
+      // Extract first H1 tag
+      const h1Match = html.match(/<h1[^>]*>(.*?)<\/h1>/i);
+      const h1Tag = h1Match ? h1Match[1].replace(/<[^>]*>/g, '').trim() : null;
+
+      // Check for LocalBusiness schema
+      const hasLocalBusinessSchema = html.includes('"@type":"LocalBusiness"') || 
+                                      html.includes('"@type": "LocalBusiness"');
+
+      // Extract city/location from address
+      const locationMatch = fullAddress.match(/,\s*([A-Za-z\s]+),\s*[A-Z]{2}/);
+      const cityName = locationMatch ? locationMatch[1].trim().toLowerCase() : '';
+
+      // Check for local keywords in title
+      const titleLower = (titleTag || '').toLowerCase();
+      const localKeywordsInTitle = cityName ? titleLower.includes(cityName) : false;
+
+      // Check for location in H1
+      const h1Lower = (h1Tag || '').toLowerCase();
+      const locationInH1 = cityName ? h1Lower.includes(cityName) : false;
+
+      // Check for location in meta description
+      const metaLower = (metaDescription || '').toLowerCase();
+      const locationInMetaDescription = cityName ? metaLower.includes(cityName) : false;
+
+      // Simple NAP detection (address and phone)
+      const addressPresent = html.toLowerCase().includes(fullAddress.split(',')[0].toLowerCase());
+      
+      // Phone number patterns: (123) 456-7890, 123-456-7890, 123.456.7890
+      const phonePattern = /(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/;
+      const phoneNumberPresent = phonePattern.test(html);
+
+      return {
+        titleTag,
+        metaDescription,
+        h1Tag,
+        hasLocalBusinessSchema,
+        localKeywordsInTitle,
+        addressPresent,
+        phoneNumberPresent,
+        locationInH1,
+        locationInMetaDescription
+      };
+    } catch (error: any) {
+      console.error('Error parsing HTML:', error);
+      return { error: `HTML parsing failed: ${error.message}` };
+    }
+  }
+
+  /**
+   * Fetch website HTML
+   */
+  async function fetchWebsiteHtml(url: string): Promise<string> {
+    console.log(`Fetching HTML for: ${url}`);
+    try {
+      const response = await fetch(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           'Accept': 'text/html'
         }
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch website HTML (${response.status}): ${response.statusText}`);
+        throw new Error(`Failed to fetch website (${response.status})`);
       }
       return await response.text();
-    } catch (err: any) {
-      console.error('Error fetching site HTML:', err);
-      return '<html><body><title>Error</title>Error: Could not fetch website content.</body></html>';
+    } catch (error: any) {
+      console.error('Error fetching HTML:', error);
+      throw error;
     }
   }
 
   /**
-   * --- UPDATED with 9-second timeout ---
-   * Fetches PageSpeed Insights, racing against a 9-second timer.
+   * Check if business exists on a directory and verify NAP
+   */
+  async function checkCitation(
+    platform: 'yelp' | 'foursquare' | 'yellowpages',
+    businessName: string,
+    address: string
+  ): Promise<{ found: boolean; url: string | null; napMatch: boolean }> {
+    
+    const searchQueries: Record<string, string> = {
+      yelp: `site:yelp.com "${businessName}" "${address.split(',')[0]}"`,
+      foursquare: `site:foursquare.com "${businessName}" "${address.split(',')[0]}"`,
+      yellowpages: `site:yellowpages.com "${businessName}" "${address.split(',')[0]}"`
+    };
+
+    try {
+      // Use Google to search for the business on each platform
+      // This is a simple approach - in production you might use their APIs
+      const searchQuery = searchQueries[platform];
+      const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`;
+      
+      const response = await fetch(searchUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        return { found: false, url: null, napMatch: false };
+      }
+
+      const html = await response.text();
+      
+      // Extract first result URL
+      const platformDomains: Record<string, string> = {
+        yelp: 'yelp.com/biz/',
+        foursquare: 'foursquare.com/v/',
+        yellowpages: 'yellowpages.com/mip/'
+      };
+
+      const urlPattern = new RegExp(`https?://[^"]*${platformDomains[platform]}[^"]*`, 'i');
+      const urlMatch = html.match(urlPattern);
+      
+      if (!urlMatch) {
+        return { found: false, url: null, napMatch: false };
+      }
+
+      const foundUrl = urlMatch[0].split('&')[0]; // Clean up URL
+
+      // Fetch the listing page to verify NAP
+      const listingResponse = await fetch(foundUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!listingResponse.ok) {
+        return { found: true, url: foundUrl, napMatch: false };
+      }
+
+      const listingHtml = await listingResponse.text();
+      
+      // Simple NAP check - does the page contain the address street?
+      const addressStreet = address.split(',')[0].toLowerCase();
+      const napMatch = listingHtml.toLowerCase().includes(addressStreet);
+
+      return { found: true, url: foundUrl, napMatch };
+
+    } catch (error: any) {
+      console.error(`Error checking ${platform}:`, error);
+      return { found: false, url: null, napMatch: false };
+    }
+  }
+
+  /**
+   * PageSpeed Insights with timeout
    */
   async function getSpeedInsights(url: string): Promise<Record<string, any>> {
-    let psiApiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=MOBILE&category=PERFORMANCE&category=ACCESSIBILITY&category=BEST-PRACTICES&category=SEO`;
+    let psiApiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=MOBILE&category=PERFORMANCE&category=ACCESSIBILITY&category=BEST_PRACTICES&category=SEO`;
     
     if (psiApiKey) {
       psiApiUrl += `&key=${psiApiKey}`;
-    } else {
-      console.warn('PSI_API_KEY is not set. Free tier usage is limited.');
     }
 
-    // --- NEW: Timeout Promise ---
-    // Creates a promise that rejects after 9 seconds (9000ms)
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => {
-        reject(new Error("PageSpeed Insights API timed out after 9 seconds."));
-      }, 9000);
+      setTimeout(() => reject(new Error("PageSpeed Insights timed out after 15 seconds")), 15000);
     });
 
     try {
-      // --- NEW: Promise.race ---
-      // We race the fetch call against the timeout.
       const response = await Promise.race([
         fetch(psiApiUrl),
         timeoutPromise
-      ]) as Response; // Cast to Response, as timeoutPromise won't resolve
+      ]) as Response;
 
       if (!response.ok) {
         const errorData = await response.json();
-        console.error('PageSpeed Insights API error:', errorData);
-        throw new Error(`PageSpeed Insights API failed: ${errorData.error.message}`);
+        throw new Error(`PageSpeed API failed: ${errorData.error?.message || response.statusText}`);
       }
       
       const data = await response.json();
       const lighthouse = data.lighthouseResult;
+      
       return {
-        performance: (lighthouse.categories.performance.score || 0) * 100,
-        accessibility: (lighthouse.categories.accessibility.score || 0) * 100,
-        bestPractices: (lighthouse.categories['best-practices'].score || 0) * 100,
-        seo: (lighthouse.categories.seo.score || 0) * 100,
+        performance: Math.round((lighthouse.categories.performance?.score || 0) * 100),
+        accessibility: Math.round((lighthouse.categories.accessibility?.score || 0) * 100),
+        bestPractices: Math.round((lighthouse.categories['best-practices']?.score || 0) * 100),
+        seo: Math.round((lighthouse.categories.seo?.score || 0) * 100),
+        loadTime: lighthouse.audits['speed-index']?.numericValue || null,
+        firstContentfulPaint: lighthouse.audits['first-contentful-paint']?.numericValue || null
       };
     } catch (error: any) {
-      console.error('Error fetching PageSpeed Insights:', error);
-      // This will now catch our custom timeout error too!
-      return { error: `PageSpeed Insights failed: ${error.message}` };
+      console.error('PageSpeed Insights error:', error);
+      return { error: error.message };
     }
   }
 
-  // --- Prompts and Payloads ---
+  // --- MAIN ANALYSIS FUNCTIONS ---
 
   async function analyzeGbp(businessName: string, fullAddress: string): Promise<Record<string, any>> {
-    const systemPrompt = `You are a local SEO analyst. Respond ONLY with a valid JSON object. Schema: { "name": "...", "rating": 4.5, "reviewCount": 123, ... }`;
-    const userQuery = `Find the Google Business Profile for "${businessName}" at "${fullAddress}". Get its name, rating, review count, and top 2-3 competitors. Return ONLY the JSON.`;
-    const payload = {
-      contents: [{ parts: [{ text: userQuery }] }],
-      tools: [{ "google_search": {} }],
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-    };
-    return callGeminiApi(payload);
+    try {
+      // Search for the business
+      const query = `${businessName} ${fullAddress}`;
+      const places = await placesTextSearch(query);
+
+      if (places.length === 0) {
+        return { 
+          error: 'Business not found on Google',
+          name: businessName,
+          rating: null,
+          reviewCount: null,
+          address: fullAddress,
+          competitors: []
+        };
+      }
+
+      // First result should be the target business
+      const business = places[0];
+      
+      // Rest are competitors (if any)
+      const competitors = places.slice(1, 4).map((place: any) => ({
+        name: place.displayName?.text || 'Unknown',
+        rating: place.rating || 0,
+        reviewCount: place.userRatingCount || 0
+      }));
+
+      return {
+        name: business.displayName?.text || businessName,
+        rating: business.rating || 0,
+        reviewCount: business.userRatingCount || 0,
+        address: business.formattedAddress || fullAddress,
+        competitors
+      };
+
+    } catch (error: any) {
+      console.error('GBP analysis error:', error);
+      return { 
+        error: error.message,
+        name: businessName,
+        rating: null,
+        reviewCount: null,
+        address: fullAddress,
+        competitors: []
+      };
+    }
   }
 
   async function analyzeCitations(businessName: string, fullAddress: string): Promise<Record<string, any>> {
-    const systemPrompt = `You are a citation analyst. Respond ONLY with a valid JSON object. Schema: { "yelp": { "found": true, "url": "...", "napMatch": true }, ... }`;
-    const userQuery = `Search for "${businessName}" at "${fullAddress}" on Yelp, Foursquare, and YellowPages. For each: check if found, get the URL, and check for NAP match. Return ONLY the JSON.`;
-    const payload = {
-      contents: [{ parts: [{ text: userQuery }] }],
-      tools: [{ "google_search": {} }],
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-    };
-    return callGeminiApi(payload);
+    try {
+      // Check all three platforms in parallel
+      const [yelp, foursquare, yellowPages] = await Promise.all([
+        checkCitation('yelp', businessName, fullAddress),
+        checkCitation('foursquare', businessName, fullAddress),
+        checkCitation('yellowpages', businessName, fullAddress)
+      ]);
+
+      return {
+        yelp,
+        foursquare,
+        yellowPages
+      };
+    } catch (error: any) {
+      console.error('Citation analysis error:', error);
+      return {
+        yelp: { found: false, url: null, napMatch: false },
+        foursquare: { found: false, url: null, napMatch: false },
+        yellowPages: { found: false, url: null, napMatch: false },
+        error: error.message
+      };
+    }
   }
 
-  async function analyzeOnPageHtml(htmlContent: string): Promise<Record<string, any>> {
-    const maxHtmlLength = 50000;
-    const truncatedHtml = htmlContent.length > maxHtmlLength 
-      ? htmlContent.substring(0, maxHtmlLength) + "\n... [HTML Truncated] ..." 
-      : htmlContent;
-
-    const systemPrompt = `You are an on-page SEO analyst. Analyze the provided HTML. Respond ONLY with a valid JSON object. Schema: { "titleTag": "...", "metaDescription": "...", "hasLocalBusinessSchema": true, ... }`;
-    const userQuery = `Analyze this HTML for local SEO: ${truncatedHtml}`;
-    const payload = {
-      contents: [{ parts: [{ text: userQuery }] }],
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      generationConfig: { responseMimeType: "application/json" }
-    };
-    return callGeminiApi(payload);
+  async function analyzeOnPage(websiteUrl: string, businessName: string, fullAddress: string): Promise<Record<string, any>> {
+    try {
+      const html = await fetchWebsiteHtml(websiteUrl);
+      return parseHtmlForSeo(html, businessName, fullAddress);
+    } catch (error: any) {
+      console.error('On-page analysis error:', error);
+      return { error: error.message };
+    }
   }
 
-  // --- Main Task Handler ---
+  // --- MAIN ROUTER ---
   try {
     let result;
+    
     switch (type) {
       case 'gbp':
         result = await analyzeGbp(businessName, fullAddress);
         break;
+      
       case 'citations':
         result = await analyzeCitations(businessName, fullAddress);
         break;
+      
       case 'onPage':
-        const htmlContent = await fetchWebsiteHtml(websiteUrl);
-        result = await analyzeOnPageHtml(htmlContent);
+        result = await analyzeOnPage(websiteUrl, businessName, fullAddress);
         break;
+      
       case 'speed':
         result = await getSpeedInsights(websiteUrl);
         break;
+      
       default:
         throw new Error(`Unknown analysis type: ${type}`);
     }
@@ -225,10 +383,10 @@ export default async function handler(request: Request) {
     });
 
   } catch (error: any) {
-    return new Response(JSON.stringify({ error: `Failed to generate report: ${error.message}` }), {
+    console.error('Handler error:', error);
+    return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     });
   }
 }
-
