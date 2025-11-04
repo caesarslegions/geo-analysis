@@ -1,8 +1,6 @@
 // api/get-analysis.ts
 // ---------------------------------------------------------------
-// Budget-friendly citation analysis: Free APIs + direct checks (2025 edition)
-// Removes Yext/BBB/Bing; adds Facebook, YellowPages, Whitepages, MapQuest
-// Uses Google Custom Search for reliable "site:" checks (free 100/day)
+// LOCAL SEO CITATIONS: Free, accurate, no subscriptions (2025)
 // ---------------------------------------------------------------
 
 export default async function handler(request: Request) {
@@ -15,11 +13,15 @@ export default async function handler(request: Request) {
 
   // ------------------- ENV KEYS -------------------
   const googlePlacesApiKey = process.env.GOOGLE_PLACES_API_KEY;
-  const googleCustomSearchKey = process.env.GOOGLE_CUSTOM_SEARCH_KEY; // New: For site: checks
-  const googleCseId = process.env.GOOGLE_CSE_ID; // New: CSE ID
+  const googleCustomSearchKey = process.env.GOOGLE_CUSTOM_SEARCH_KEY;
+  const googleCseId = process.env.GOOGLE_CSE_ID;
   const yelpApiKey = process.env.YELP_API_KEY;
   const foursquareApiKey = process.env.FOURSQUARE_API_KEY;
+  const mapquestKey = process.env.MAPQUEST_KEY; // Free tier: 15k/mo
   const psiApiKey = process.env.PSI_API_KEY;
+
+  // CHANGE THIS TO YOUR DOMAIN
+  const userAgentDomain = process.env.SEO_TOOL_DOMAIN || 'yourdomain.com'; // <-- SET THIS!
 
   if (!googlePlacesApiKey) {
     return new Response(JSON.stringify({ error: 'Google Places API key missing' }), {
@@ -37,26 +39,27 @@ export default async function handler(request: Request) {
     });
   }
 
+  const street = fullAddress.split(',')[0].trim().toLowerCase();
+
   // ------------------- HELPERS -------------------
   const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
-
   async function withTimeout<T>(promise: Promise<T>, ms: number, msg: string): Promise<T> {
     const timeout = new Promise<T>((_, rej) => setTimeout(() => rej(new Error(msg)), ms));
     return Promise.race([promise, timeout]);
   }
 
-  // Google Custom Search for site: checks (free fallback)
+  // Google Custom Search (site: checks)
   async function googleSiteSearch(site: string, query: string): Promise<any> {
     if (!googleCustomSearchKey || !googleCseId) {
       return { found: false, reason: 'Custom Search not configured' };
     }
-    const url = `https://www.googleapis.com/customsearch/v1?key=${googleCustomSearchKey}&cx=${googleCseId}&q=site:${site} "${businessName}" "${fullAddress.split(',')[0]}"`;
+    const url = `https://www.googleapis.com/customsearch/v1?key=${googleCustomSearchKey}&cx=${googleCseId}&q=site:${site} "${businessName}" "${street}"`;
     try {
       const resp = await withTimeout(fetch(url), 3000, 'Google CSE timeout');
       if (!resp.ok) return { found: false };
       const data = await resp.json();
       const hit = data.items?.[0];
-      if (!hit) return { found: false, reason: 'No results' };
+      if (!hit) return { found: false };
       return { found: true, url: hit.link };
     } catch {
       return { found: false };
@@ -73,15 +76,13 @@ export default async function handler(request: Request) {
           headers: {
             'Content-Type': 'application/json',
             'X-Goog-Api-Key': googlePlacesApiKey,
-            'X-Goog-FieldMask':
-              'places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.id',
+            'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.id',
           },
           body: JSON.stringify({ textQuery: query, maxResultCount: 5 }),
         }),
         8000,
         'Google Places timeout'
       );
-
       if (!resp.ok) throw new Error(`Places ${resp.status}`);
       const data = await resp.json();
       return data.places || [];
@@ -93,180 +94,124 @@ export default async function handler(request: Request) {
 
   // ------------------- YELP -------------------
   async function checkYelp(businessName: string, address: string): Promise<any> {
-    if (!yelpApiKey) {
-      return { found: false, reason: 'API key not configured' };
-    }
+    if (!yelpApiKey) return { found: false, reason: 'API key not configured' };
     try {
       const parts = address.split(',').map(s => s.trim());
       const city = parts[1] || '';
       const state = parts[2]?.split(' ')[0] || '';
-
-      const url = `https://api.yelp.com/v3/businesses/search?term=${encodeURIComponent(
-        businessName
-      )}&location=${encodeURIComponent(`${city}, ${state}`)}&limit=5`;
-
-      const resp = await withTimeout(
-        fetch(url, { headers: { Authorization: `Bearer ${yelpApiKey}` } }),
-        4000,
-        'Yelp timeout'
-      );
-
+      const url = `https://api.yelp.com/v3/businesses/search?term=${encodeURIComponent(businessName)}&location=${encodeURIComponent(`${city}, ${state}`)}&limit=5`;
+      const resp = await withTimeout(fetch(url, { headers: { Authorization: `Bearer ${yelpApiKey}` } }), 4000);
       if (!resp.ok) return { found: false, error: `Yelp ${resp.status}` };
       const data = await resp.json();
-
       if (!data.businesses?.length) return { found: false, reason: 'No results' };
-
       const biz = data.businesses[0];
-      const street = address.split(',')[0].toLowerCase().trim();
-      const napMatch = (biz.location?.address1 || '')
-        .toLowerCase()
-        .includes(street);
-
-      return {
-        found: true,
-        url: biz.url,
-        napMatch,
-        rating: biz.rating,
-        reviewCount: biz.review_count,
-        categories: biz.categories?.map((c: any) => c.title) || [],
-        phone: biz.phone,
-        isClaimed: biz.is_claimed,
-        imageUrl: biz.image_url,
-      };
+      const napMatch = (biz.location?.address1 || '').toLowerCase().includes(street);
+      return { found: true, url: biz.url, napMatch, rating: biz.rating, reviewCount: biz.review_count };
     } catch (e: any) {
-      console.error('Yelp error:', e);
       return { found: false, error: e.message };
     }
   }
 
-  // ------------------- FOURSQUARE -------------------
+  // ------------------- FOURSQUARE (FIXED) -------------------
   async function checkFoursquare(businessName: string, address: string): Promise<any> {
     if (!foursquareApiKey) return { found: false, reason: 'API key not configured' };
-
-    const url = `https://api.foursquare.com/v3/places/search?query=${encodeURIComponent(
-      businessName
-    )}&near=${encodeURIComponent(address)}&limit=5`;
-
+    const url = `https://api.foursquare.com/v3/places/search?query=${encodeURIComponent(businessName)}&near=${encodeURIComponent(address)}&limit=5`;
     try {
       const resp = await withTimeout(
         fetch(url, {
           headers: {
-            Authorization: foursquareApiKey, // No Bearer
+            Authorization: foursquareApiKey, // NO "Bearer"
             Accept: 'application/json',
           },
         }),
-        4000,
-        'Foursquare timeout'
+        4000
       );
-
       if (!resp.ok) return { found: false, error: `Foursquare ${resp.status}` };
       const data = await resp.json();
-
       if (!data.results?.length) return { found: false, reason: 'No results' };
-
       const place = data.results[0];
-      const street = address.split(',')[0].toLowerCase().trim();
-      const napMatch = (place.location?.address || '')
-        .toLowerCase()
-        .includes(street);
-
-      return {
-        found: true,
-        url: `https://foursquare.com/v/${place.fsq_id}`,
-        napMatch,
-        categories: place.categories?.map((c: any) => c.name) || [],
-        verified: place.verified,
-      };
+      const napMatch = (place.location?.address || '').toLowerCase().includes(street);
+      return { found: true, url: `https://foursquare.com/v/${place.fsq_id}`, napMatch };
     } catch (e: any) {
-      console.error('Foursquare error:', e);
       return { found: false, error: e.message };
     }
   }
 
-  // ------------------- NEW: YELLOWPAGES (Direct Search) -------------------
+  // ------------------- YELLOWPAGES (EXACT URL) -------------------
   async function checkYellowPages(businessName: string, address: string): Promise<any> {
     const [city] = address.split(',').slice(1).map(s => s.trim());
-    const url = `https://www.yellowpages.com/search?search_terms=${encodeURIComponent(businessName)}&geo_location_terms=${encodeURIComponent(city)}`;
-
+    const searchUrl = `https://www.yellowpages.com/search?search_terms=${encodeURIComponent(businessName)}&geo_location_terms=${encodeURIComponent(city)}`;
     try {
-      const resp = await withTimeout(fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }), 4000, 'YP timeout');
-      if (!resp.ok) return { found: false };
+      const resp = await withTimeout(fetch(searchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }), 4000);
+      if (!resp.ok) throw new Error();
       const html = await resp.text();
-      const match = html.match(/"url":"https:\/\/www\.yellowpages\.com\/[^"]*"/);
-      if (!match) return { found: false, reason: 'No results' };
-      const url = JSON.parse(`{"url": "${match[0]}"}`).url;
-      const street = address.split(',')[0].toLowerCase();
+      const match = html.match(/href="(\/[^"]*\/mip\/[^"]*)"/);
+      if (!match) return { found: false, reason: 'No MIP link' };
+      const businessUrl = `https://www.yellowpages.com${match[1]}`;
       const napMatch = html.toLowerCase().includes(street);
-      return { found: true, url, napMatch };
+      return { found: true, url: businessUrl, napMatch };
     } catch {
-      // Fallback to Google CSE
-      return await googleSiteSearch('yellowpages.com', `${businessName} ${address}`);
+      return await googleSiteSearch('yellowpages.com', `${businessName} ${street}`);
     }
   }
 
-  // ------------------- NEW: FACEBOOK (Graph Search Fallback) -------------------
+  // ------------------- FACEBOOK (OFFICIAL PAGE) -------------------
   async function checkFacebook(businessName: string, address: string): Promise<any> {
-    const query = `${businessName} ${address}`;
-    // Use Google CSE for FB pages (public search)
-    return await googleSiteSearch('facebook.com', query);
-  }
-
-  // ------------------- NEW: WHITEPAGES (Direct) -------------------
-  async function checkWhitepages(businessName: string, address: string): Promise<any> {
-    const [city, state] = address.split(',').slice(1).map(s => s.trim());
-    const url = `https://www.whitepages.com/name/${encodeURIComponent(businessName)}/${encodeURIComponent(city)}-${state}`;
-
-    try {
-      const resp = await withTimeout(fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }), 4000, 'WP timeout');
-      if (!resp.ok) return { found: false };
-      const html = await resp.text();
-      if (html.includes(businessName) && html.includes(address.split(',')[0])) {
-        return { found: true, url, napMatch: true };
-      }
-      return { found: false };
-    } catch {
-      return await googleSiteSearch('whitepages.com', `${businessName} ${address}`);
+    const result = await googleSiteSearch('facebook.com', `${businessName} site:facebook.com/pages`);
+    if (!result.found) return result;
+    if (result.url.includes('/pages/') || result.url.toLowerCase().includes(businessName.toLowerCase().replace(/\s/g, ''))) {
+      return result;
     }
+    return { found: false, reason: 'No official page' };
   }
 
-  // ------------------- NEW: MAPQUEST (Open API) -------------------
+  // ------------------- WHITEPAGES (CSE ONLY) -------------------
+  async function checkWhitepages(businessName: string, address: string): Promise<any> {
+    return await googleSiteSearch('whitepages.com', `${businessName} ${street}`);
+  }
+
+  // ------------------- MAPQUEST (FREE KEY) -------------------
   async function checkMapQuest(businessName: string, address: string): Promise<any> {
-    const url = `http://www.mapquestapi.com/search/v2/radius?key=${process.env.MAPQUEST_KEY || ''}&origin=${encodeURIComponent(address)}&radius=1&keyword=${encodeURIComponent(businessName)}`; // Free key optional
+    if (!mapquestKey) return { found: false, reason: 'MapQuest key missing' };
+    const url = `http://www.mapquestapi.com/search/v2/radius?key=${mapquestKey}&origin=${encodeURIComponent(address)}&radius=5&maxMatches=1&keyword=${encodeURIComponent(businessName)}`;
     try {
-      const resp = await withTimeout(fetch(url), 4000, 'MQ timeout');
+      const resp = await withTimeout(fetch(url), 4000);
       if (!resp.ok) return { found: false };
       const data = await resp.json();
-      const place = data.search?.[0];
+      const place = data.searchResults?.[0];
       if (!place) return { found: false };
-      return { found: true, url: `https://www.mapquest.com/${place.id}`, napMatch: true };
+      return { found: true, url: `https://www.mapquest.com/search/results?query=${encodeURIComponent(businessName)}`, napMatch: true };
     } catch {
-      return await googleSiteSearch('mapquest.com', `${businessName} ${address}`);
+      return { found: false };
     }
   }
 
-  // ------------------- NEW: OPENSTREETMAP (Free Address Verify) -------------------
+  // ------------------- OPENSTREETMAP (WITH UA) -------------------
   async function checkOpenStreetMap(address: string): Promise<any> {
     const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`;
     try {
-      const resp = await withTimeout(fetch(url), 2000, 'OSM timeout');
+      const resp = await withTimeout(
+        fetch(url, {
+          headers: { 'User-Agent': `LocalSEOTool/1.0 (+https://${userAgentDomain})` }
+        }),
+        2000
+      );
       if (!resp.ok) return { found: false };
       const data = await resp.json();
-      if (data.length === 0) return { found: false };
-      return { found: true, url: `https://www.openstreetmap.org/${data[0].osm_type}/${data[0].osm_id}`, napMatch: true };
+      if (!data.length) return { found: false };
+      const r = data[0];
+      return { found: true, url: `https://openstreetmap.org/${r.osm_type}/${r.osm_id}`, displayName: r.display_name };
     } catch {
       return { found: false };
     }
   }
 
-  // ------------------- PAGESPEED INSIGHTS -------------------
+  // ------------------- PAGESPEED & ON-PAGE (unchanged) -------------------
   async function getSpeedInsights(url: string): Promise<Record<string, any>> {
-    let apiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(
-      url
-    )}&strategy=MOBILE&category=PERFORMANCE&category=ACCESSIBILITY&category=BEST_PRACTICES&category=SEO`;
+    let apiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=MOBILE&category=PERFORMANCE&category=ACCESSIBILITY&category=BEST_PRACTICES&category=SEO`;
     if (psiApiKey) apiUrl += `&key=${psiApiKey}`;
-
     try {
-      const resp = await withTimeout(fetch(apiUrl), 9000, 'PSI timeout');
+      const resp = await withTimeout(fetch(apiUrl), 9000);
       if (!resp.ok) throw new Error(`PSI ${resp.status}`);
       const data = await resp.json();
       const l = data.lighthouseResult;
@@ -279,20 +224,16 @@ export default async function handler(request: Request) {
         firstContentfulPaint: l.audits['first-contentful-paint']?.numericValue ?? null,
       };
     } catch (e: any) {
-      console.error('PSI error:', e);
       return { error: e.message };
     }
   }
 
-  // ------------------- ON-PAGE PARSER -------------------
   function parseHtmlForSeo(html: string, businessName: string, fullAddress: string) {
     const title = html.match(/<title[^>]*>(.*?)<\/title>/i)?.[1]?.trim() ?? null;
     const metaDesc = html.match(/<meta\s+name=["']description["']\s+content=["']([^"']*)["']/i)?.[1]?.trim() ?? null;
     const h1 = html.match(/<h1[^>]*>(.*?)<\/h1>/i)?.[1]?.replace(/<[^>]*>/g, '').trim() ?? null;
     const hasLocalSchema = /"@type"\s*:\s*["']LocalBusiness["']/.test(html);
     const city = fullAddress.match(/,\s*([A-Za-z\s]+),\s*[A-Z]{2}/)?.[1]?.toLowerCase() ?? '';
-    const street = fullAddress.split(',')[0].toLowerCase();
-
     return {
       titleTag: title,
       metaDescription: metaDesc,
@@ -314,19 +255,16 @@ export default async function handler(request: Request) {
           Accept: 'text/html',
         },
       }),
-      7000,
-      'Website fetch timeout'
+      7000
     );
     if (!resp.ok) throw new Error(`Website ${resp.status}`);
     return await resp.text();
   }
 
-  // ------------------- MAIN ANALYZERS -------------------
+  // ------------------- ANALYZERS -------------------
   async function analyzeGbp(businessName: string, fullAddress: string) {
     const places = await placesTextSearch(`${businessName} ${fullAddress}`);
-    if (!places.length) {
-      return { error: 'Not found on Google', name: businessName, rating: null, reviewCount: null, competitors: [] };
-    }
+    if (!places.length) return { error: 'Not found on Google', name: businessName, rating: null, reviewCount: null, competitors: [] };
     const main = places[0];
     const competitors = places.slice(1, 4).map((p: any) => ({
       name: p.displayName?.text || 'Unknown',
@@ -343,17 +281,7 @@ export default async function handler(request: Request) {
   }
 
   async function analyzeCitations(businessName: string, fullAddress: string) {
-    const street = fullAddress.split(',')[0].trim();
-
-    const [
-      yelp,
-      foursquare,
-      yellowPages,
-      facebook,
-      whitepages,
-      mapquest,
-      openStreetMap,
-    ] = await Promise.all([
+    const results = await Promise.all([
       checkYelp(businessName, fullAddress),
       checkFoursquare(businessName, fullAddress),
       checkYellowPages(businessName, fullAddress),
@@ -363,22 +291,21 @@ export default async function handler(request: Request) {
       checkOpenStreetMap(fullAddress),
     ]);
 
-    const results = {
-      yelp,
-      foursquare,
-      yellowPages,
-      facebook,
-      whitepages,
-      mapquest,
-      openStreetMap,
+    const obj: any = {
+      yelp: results[0],
+      foursquare: results[1],
+      yellowPages: results[2],
+      facebook: results[3],
+      whitepages: results[4],
+      mapquest: results[5],
+      openStreetMap: results[6],
     };
 
-    // Simple score: % of sources with found + NAP match
-    const totalSources = 7;
-    const consistent = Object.values(results).filter((r: any) => r.found && (r.napMatch ?? true)).length;
-    results.citationScore = Math.round((consistent / totalSources) * 100);
+    const total = 7;
+    const consistent = Object.values(obj).filter((r: any) => r.found && (r.napMatch !== false)).length;
+    obj.citationScore = Math.round((consistent / total) * 100);
 
-    return results;
+    return obj;
   }
 
   async function analyzeOnPage(websiteUrl: string, businessName: string, fullAddress: string) {
@@ -390,31 +317,15 @@ export default async function handler(request: Request) {
   try {
     let result;
     switch (type) {
-      case 'gbp':
-        result = await analyzeGbp(businessName, fullAddress);
-        break;
-      case 'citations':
-        result = await analyzeCitations(businessName, fullAddress);
-        break;
-      case 'onPage':
-        result = await analyzeOnPage(websiteUrl, businessName, fullAddress);
-        break;
-      case 'speed':
-        result = await getSpeedInsights(websiteUrl);
-        break;
-      default:
-        throw new Error(`Unknown type: ${type}`);
+      case 'gbp': result = await analyzeGbp(businessName, fullAddress); break;
+      case 'citations': result = await analyzeCitations(businessName, fullAddress); break;
+      case 'onPage': result = await analyzeOnPage(websiteUrl, businessName, fullAddress); break;
+      case 'speed': result = await getSpeedInsights(websiteUrl); break;
+      default: throw new Error(`Unknown type: ${type}`);
     }
-
-    return new Response(JSON.stringify(result), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return new Response(JSON.stringify(result), { status: 200, headers: { 'Content-Type': 'application/json' } });
   } catch (e: any) {
     console.error('Handler error:', e);
-    return new Response(JSON.stringify({ error: e.message }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
   }
 }
