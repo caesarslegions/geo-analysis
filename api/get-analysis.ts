@@ -138,22 +138,35 @@ export default async function handler(request: Request) {
   }
 
   // ------------------- YELLOWPAGES (EXACT URL) -------------------
-  async function checkYellowPages(businessName: string, address: string): Promise<any> {
-    const [city] = address.split(',').slice(1).map(s => s.trim());
-    const searchUrl = `https://www.yellowpages.com/search?search_terms=${encodeURIComponent(businessName)}&geo_location_terms=${encodeURIComponent(city)}`;
-    try {
-      const resp = await withTimeout(fetch(searchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }), 4000);
-      if (!resp.ok) throw new Error();
-      const html = await resp.text();
-      const match = html.match(/href="(\/[^"]*\/mip\/[^"]*)"/);
-      if (!match) return { found: false, reason: 'No MIP link' };
-      const businessUrl = `https://www.yellowpages.com${match[1]}`;
+async function checkYellowPages(businessName: string, address: string): Promise<any> {
+  const [city] = address.split(',').slice(1).map(s => s.trim());
+  const searchUrl = `https://www.yellowpages.com/search?search_terms=${encodeURIComponent(businessName)}&geo_location_terms=${encodeURIComponent(city)}`;
+
+  try {
+    const resp = await withTimeout(fetch(searchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }), 5000);
+    if (!resp.ok) throw new Error();
+    const html = await resp.text();
+
+    // New 2025 pattern: look for data-testid or business link
+    const mipMatch = html.match(/href="(\/[^"]*\/mip\/[^"]*)"/);
+    if (mipMatch) {
+      const businessUrl = `https://www.yellowpages.com${mipMatch[1]}`;
       const napMatch = html.toLowerCase().includes(street);
       return { found: true, url: businessUrl, napMatch };
-    } catch {
-      return await googleSiteSearch('yellowpages.com', `${businessName} ${street}`);
     }
+
+    // Fallback: look for first business name + link
+    const linkMatch = html.match(/class="business-name"[^>]*href="([^"]*)"/);
+    if (linkMatch) {
+      const businessUrl = `https://www.yellowpages.com${linkMatch[1]}`;
+      return { found: true, url: businessUrl, napMatch: false };
+    }
+
+    return { found: false, reason: 'No business link' };
+  } catch {
+    return await googleSiteSearch('yellowpages.com', `${businessName} ${street}`);
   }
+}
 
   // ------------------- FACEBOOK (OFFICIAL PAGE) -------------------
   async function checkFacebook(businessName: string, address: string): Promise<any> {
