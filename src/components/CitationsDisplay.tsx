@@ -10,7 +10,8 @@ import {
   MapPin,
   Phone,
   Globe,
-  Building2,
+  Clock,
+  Camera,
   Verified
 } from 'lucide-react';
 import { GeoReport } from '@/services/analysisService';
@@ -25,13 +26,13 @@ const CitationsDisplay = ({ analysis }: CitationsDisplayProps) => {
   if (!citations) return null;
 
   const sources = [
-    { key: 'yelp', name: 'Yelp', color: 'red', logo: 'Yelp', data: citations.yelp },
-    { key: 'foursquare', name: 'Foursquare', color: 'pink', logo: 'Foursquare', data: citations.foursquare },
-    { key: 'yellowPages', name: 'Yellow Pages', color: 'yellow', logo: 'Yellow Pages', data: citations.yellowPages },
-    { key: 'facebook', name: 'Facebook', color: 'blue', logo: 'Facebook', data: citations.facebook },
-    { key: 'whitepages', name: 'Whitepages', color: 'gray', logo: 'Whitepages', data: citations.whitepages },
-    { key: 'mapquest', name: 'MapQuest', color: 'green', logo: 'MapQuest', data: citations.mapquest },
-    { key: 'openStreetMap', name: 'OpenStreetMap', color: 'orange', logo: 'OpenStreetMap', data: citations.openStreetMap },
+    { key: 'yelp', name: 'Yelp', logo: 'Yelp', data: citations.yelp },
+    { key: 'foursquare', name: 'Foursquare', logo: 'Foursquare', data: citations.foursquare },
+    { key: 'yellowPages', name: 'Yellow Pages', logo: 'Yellow Pages', data: citations.yellowPages },
+    { key: 'facebook', name: 'Facebook', logo: 'Facebook', data: citations.facebook },
+    { key: 'whitepages', name: 'Whitepages', logo: 'Whitepages', data: citations.whitepages },
+    { key: 'mapquest', name: 'MapQuest', logo: 'MapQuest', data: citations.mapquest },
+    { key: 'openStreetMap', name: 'OpenStreetMap', logo: 'OpenStreetMap', data: citations.openStreetMap },
   ];
 
   const foundSources = sources.filter(s => s.data?.found);
@@ -53,29 +54,27 @@ const CitationsDisplay = ({ analysis }: CitationsDisplayProps) => {
             <div>
               <CardTitle className="text-2xl">Directory Citations</CardTitle>
               <CardDescription className="text-base">
-                Your business presence across 7 major directories
+                7 major directories analyzed with rich data
               </CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent>
-          {/* Summary Stats */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <div className="p-4 bg-green-50 rounded-lg border border-green-200">
-              <p className="text-sm text-green-600 font-semibold mb-1">Found Citations</p>
+              <p className="text-sm text-green-600 font-semibold mb-1">Found</p>
               <p className="text-3xl font-bold text-green-700">{foundSources.length}/7</p>
             </div>
             <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
-              <p className="text-sm text-blue-600 font-semibold mb-1">NAP Consistency</p>
+              <p className="text-sm text-blue-600 font-semibold mb-1">NAP Match</p>
               <p className="text-3xl font-bold text-blue-700">{napConsistency}%</p>
             </div>
             <div className="p-4 bg-purple-50 rounded-lg border border-purple-200">
-              <p className="text-sm text-purple-600 رنگ-semibold mb-1">Citation Score</p>
+              <p className="text-sm text-purple-600 font-semibold mb-1">Citation Score</p>
               <p className="text-3xl font-bold text-purple-700">{citations.citationScore}%</p>
             </div>
           </div>
 
-          {/* Active Listings */}
           {foundSources.length > 0 && (
             <div className="space-y-4 mb-6">
               <h3 className="text-lg font-semibold flex items-center gap-2">
@@ -91,12 +90,8 @@ const CitationsDisplay = ({ analysis }: CitationsDisplayProps) => {
                         <div>
                           <h4 className="font-bold text-lg">{source.name}</h4>
                           {source.data?.url && (
-                            <a 
-                              href={source.data.url} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="text-sm text-blue-600 hover:underline flex items-center gap-1"
-                            >
+                            <a href={source.data.url} target="_blank" rel="noopener noreferrer"
+                              className="text-sm text-blue-600 hover:underline flex items-center gap-1">
                               View Listing <ExternalLink size={14} />
                             </a>
                           )}
@@ -105,19 +100,17 @@ const CitationsDisplay = ({ analysis }: CitationsDisplayProps) => {
                       <div className="flex gap-2">
                         {source.data?.napMatch !== false ? (
                           <Badge className="bg-green-500 text-white">
-                            <CheckCircle2 size={14} className="mr-1" />
-                            NAP Match
+                            <CheckCircle2 size={14} className="mr-1" /> NAP Match
                           </Badge>
                         ) : (
                           <Badge className="bg-yellow-500 text-white">
-                            <AlertCircle size={14} className="mr-1" />
-                            NAP Mismatch
+                            <AlertCircle size={14} className="mr-1" /> Mismatch
                           </Badge>
                         )}
                       </div>
                     </div>
 
-                    {/* Yelp */}
+                    {/* Rich Data */}
                     {source.key === 'yelp' && source.data?.rating && (
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 pt-4 border-t">
                         <div className="flex items-center gap-2">
@@ -127,46 +120,35 @@ const CitationsDisplay = ({ analysis }: CitationsDisplayProps) => {
                         <div><p className="text-sm text-gray-600">Reviews</p><p className="font-bold">{source.data.reviewCount || 0}</p></div>
                         {source.data.phone && (
                           <div className="col-span-2 flex items-center gap-2">
-                            <Phone className="text-gray-500" size={16} />
-                            <p className="text-sm text-gray-600">{source.data.phone}</p>
+                            <Phone size={16} /> <p>{source.data.phone}</p>
                           </div>
                         )}
                       </div>
                     )}
 
-                    {/* Foursquare */}
-                    {source.key === 'foursquare' && source.data?.categories && (
-                      <div className="mt-4 pt-4 border-t">
-                        <p className="text-sm text-gray-600 mb-2">Categories</p>
-                        <div className="flex flex-wrap gap-2">
-                          {source.data.categories.map((cat: string, idx: number) => (
-                            <Badge key={idx} variant="outline" className="text-xs">{cat}</Badge>
-                          ))}
-                        </div>
-                        {source.data.verified && (
-                          <Badge className="bg-blue-500 text-white mt-2">
-                            <Verified size={14} className="mr-1" />
-                            Verified
-                          </Badge>
+                    {source.key === 'mapquest' && source.data && (
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 pt-4 border-t">
+                        {source.data.phone && (
+                          <div className="flex items-center gap-2 col-span-2">
+                            <Phone size={16} /> <p>{source.data.phone}</p>
+                          </div>
+                        )}
+                        {(source.data.lat && source.data.lng) && (
+                          <div className="flex items-center gap-2">
+                            <MapPin size={16} />
+                            <p className="text-xs">{source.data.lat.toFixed(4)}, {source.data.lng.toFixed(4)}</p>
+                          </div>
                         )}
                       </div>
                     )}
 
-                    {/* OpenStreetMap */}
-                    {source.key === 'openStreetMap' && source.data?.displayName && (
-                      <div className="mt-4 pt-4 border-t text-sm text-gray-600">
-                        <p className="font-medium mb-1">Verified Address:</p>
-                        <p className="italic">{source.data.displayName}</p>
-                      </div>
-                    )}
-
-                    {/* MapQuest */}
-                    {source.key === 'mapquest' && (
-                      <div className="mt-4 pt-4 border-t">
-                        <Badge className="bg-green-600 text-white">
-                          <Globe size={14} className="mr-1" />
-                          Mapped
-                        </Badge>
+                    {source.key === 'openStreetMap' && source.data?.address && (
+                      <div className="mt-4 pt-4 border-t text-sm">
+                        <p className="font-medium mb-1">Address Details</p>
+                        <div className="space-y-1 text-gray-600">
+                          {source.data.address.city && <p><strong>City:</strong> {source.data.address.city}</p>}
+                          {source.data.address.postcode && <p><strong>ZIP:</strong> {source.data.address.postcode}</p>}
+                        </div>
                       </div>
                     )}
                   </CardContent>
@@ -175,42 +157,17 @@ const CitationsDisplay = ({ analysis }: CitationsDisplayProps) => {
             </div>
           )}
 
-          {/* Pending */}
-          {pendingSources.length > 0 && (
-            <div className="space-y-3 mb-6">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <AlertCircle className="text-yellow-500" size={20} />
-                Pending Setup
-              </h3>
-              {pendingSources.map((source) => (
-                <div key={source.key} className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl">{source.logo}</span>
-                    <div><p className="font-semibold">{source.name}</p><p className="text-sm text-gray-600">{source.data?.note}</p></div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Missing */}
           {missingSources.length > 0 && (
-            <div className="space-y-3">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <XCircle className="text-red-500" size={20} />
-                Missing Listings
+            <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+              <h3 className="text-lg font-semibold flex items-center gap-2 mb-3">
+                <XCircle className="text-red-500" size={20} /> Missing
               </h3>
-              <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-sm text-gray-700 mb-3">
-                  Claim these to boost local SEO:
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {missingSources.map((source) => (
-                    <Badge key={source.key} variant="outline" className="text-red-700 border-red-300">
-                      {source.logo} {source.name}
-                    </Badge>
-                  ))}
-                </div>
+              <div className="flex flex-wrap gap-2">
+                {missingSources.map(s => (
+                  <Badge key={s.key} variant="outline" className="text-red-700 border-red-300">
+                    {s.logo} {s.name}
+                  </Badge>
+                ))}
               </div>
             </div>
           )}
