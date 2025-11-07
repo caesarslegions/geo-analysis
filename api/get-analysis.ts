@@ -352,53 +352,103 @@ export default async function handler(request: Request) {
 
   // ------------------- YELLOWPAGES (IMPROVED) -------------------
   async function checkYellowPages(businessName: string, address: string): Promise<any> {
-    const [city] = address.split(',').slice(1).map(s => s.trim());
-    const searchUrl = `https://www.yellowpages.com/search?search_terms=${encodeURIComponent(businessName)}&geo_location_terms=${encodeURIComponent(city)}`;
+    const parts = address.split(',').map(s => s.trim());
+    const city = parts[1] || '';
+    const state = parts[2]?.split(' ')[0] || '';
+    
+    // Create a search URL-friendly string
+    const searchTerm = businessName.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, '-');
+    const locationTerm = `${city.toLowerCase().replace(/\s+/g, '-')}-${state.toLowerCase()}`;
+    
+    // Try direct URL pattern first: yellowpages.com/{location}/{category}/{business-name}
+    const directUrl = `https://www.yellowpages.com/${locationTerm}/mip/${searchTerm}`;
     
     try {
-      const resp = await withTimeout(fetch(searchUrl, { 
-        headers: { 'User-Agent': 'Mozilla/5.0' } 
-      }), 5000, 'Yellow Pages timeout');
+      // First try: direct URL
+      const directResp = await withTimeout(fetch(directUrl, { 
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        redirect: 'follow'
+      }), 4000, 'YP direct timeout');
       
-      if (!resp.ok) throw new Error(`YP ${resp.status}`);
+      if (directResp.ok && !directResp.url.includes('/search?')) {
+        // We got a real business page!
+        const html = await directResp.text();
+        const phoneMatch = html.match(/(\d{3})[.-]?\s*(\d{3})[.-]?\s*(\d{4})/);
+        const phone = phoneMatch ? `${phoneMatch[1]}-${phoneMatch[2]}-${phoneMatch[3]}` : null;
+        
+        return {
+          found: true,
+          url: directResp.url,
+          name: businessName,
+          fullAddress: address,
+          phone,
+        };
+      }
+    } catch (e) {
+      // Direct URL didn't work, continue to search
+    }
+    
+    // Second try: Use Google Custom Search as a more reliable fallback
+    const result = await googleSiteSearch('yellowpages.com', `${businessName} ${city} ${state}`);
+    
+    if (result.found && result.url.includes('/mip/')) {
+      return {
+        ...result,
+        name: businessName,
+        fullAddress: address,
+      };
+    }
+    
+    return { found: false, reason: 'No Yellow Pages listing found' };
+  }
+
+  // ------------------- BING PLACES (FREE - NO API KEY) -------------------
+  async function checkBingPlaces(businessName: string, address: string): Promise<any> {
+    // Bing has a public-facing search that we can use
+    const query = `${businessName} ${address}`;
+    const searchUrl = `https://www.bing.com/maps?q=${encodeURIComponent(query)}`;
+    
+    try {
+      const resp = await withTimeout(
+        fetch(searchUrl, {
+          headers: { 
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html'
+          }
+        }),
+        5000,
+        'Bing timeout'
+      );
+      
+      if (!resp.ok) return { found: false, error: `Bing ${resp.status}` };
       const html = await resp.text();
       
-      // Look for MIP (More Info Page) links
-      const mipMatches = html.matchAll(/href="(\/[^"]*\/mip\/[^"]*)"/gi);
+      // Look for business name in the page
+      const namePattern = new RegExp(businessName.replace(/[.*+?^${}()|[\]\\]/g, '\\  // ------------------- FACEBOOK -------------------'), 'i');
+      const hasName = namePattern.test(html);
       
-      for (const match of mipMatches) {
-        const url = `https://www.yellowpages.com${match[1]}`;
+      // Look for address components
+      const streetMatch = address.split(',')[0].trim();
+      const hasStreet = html.toLowerCase().includes(streetMatch.toLowerCase());
+      
+      if (hasName && hasStreet) {
+        // Try to extract phone number
+        const phoneMatch = html.match(/(\d{3})[.-]?\s*(\d{3})[.-]?\s*(\d{4})/);
+        const phone = phoneMatch ? `${phoneMatch[1]}-${phoneMatch[2]}-${phoneMatch[3]}` : null;
         
-        // Check if this listing is near our target address
-        const contextStart = Math.max(0, match.index! - 500);
-        const contextEnd = Math.min(html.length, match.index! + 500);
-        const context = html.substring(contextStart, contextEnd).toLowerCase();
-        
-        const streetWords = street.split(/\s+/).filter(w => w.length > 3);
-        const matches = streetWords.filter(word => context.includes(word));
-        
-        if (matches.length >= 2) {
-          const phoneMatch = context.match(/(\d{3})[.-]?(\d{3})[.-]?(\d{4})/);
-          const phone = phoneMatch ? `${phoneMatch[1]}-${phoneMatch[2]}-${phoneMatch[3]}` : null;
-          
-          const nameMatch = html.substring(contextStart, contextEnd).match(
-            new RegExp(`<a[^>]*href="${match[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*>([^<]+)<`, 'i')
-          );
-          const name = nameMatch?.[1]?.trim() || businessName;
-          
-          return {
-            found: true,
-            url,
-            name,
-            fullAddress: address,
-            phone,
-          };
-        }
+        return {
+          found: true,
+          url: searchUrl,
+          name: businessName,
+          fullAddress: address,
+          phone,
+          source: 'Bing Maps'
+        };
       }
       
-      return { found: false, reason: 'No matching business found in results' };
+      return { found: false, reason: 'No matching listing on Bing' };
     } catch (e: any) {
-      return await googleSiteSearch('yellowpages.com', `${businessName} ${street}`);
+      return { found: false, error: e.message };
     }
   }
 
@@ -447,80 +497,69 @@ export default async function handler(request: Request) {
 
   // ------------------- OPENSTREETMAP (IMPROVED) -------------------
   async function checkOpenStreetMap(businessName: string, address: string): Promise<any> {
-    const query = `${businessName}, ${address}`;
-    const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&q=${encodeURIComponent(query)}&limit=5`;
+    // Try address-only search first (more reliable)
+    const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&q=${encodeURIComponent(address)}&limit=10`;
     
     try {
       const resp = await withTimeout(
         fetch(url, { 
           headers: { 'User-Agent': `LocalSEOTool/1.0 (+https://${userAgentDomain})` } 
         }),
-        2000,
+        3000,
         'OSM timeout'
       );
       
-      if (!resp.ok) return { found: false };
+      if (!resp.ok) return { found: false, error: `OSM ${resp.status}` };
       const data = await resp.json();
       
       if (!data.length) return { found: false, reason: 'No results' };
       
-      // Find best match by name similarity
+      // Look for POIs (points of interest) at this address
       const normalizedSearchName = businessName.toLowerCase().replace(/[^a-z0-9]/g, '');
       
-      let bestMatch = null;
-      let bestScore = 0;
-      
       for (const result of data) {
+        // Check if it's a POI (shop, amenity, etc.) not just an address
+        if (result.class === 'building' || result.class === 'highway') continue;
+        
         const resultName = (result.display_name || '').split(',')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
         const similarity = levenshteinSimilarity(normalizedSearchName, resultName);
         
-        if (similarity > bestScore && similarity > 0.6) {
-          bestScore = similarity;
-          bestMatch = result;
+        if (similarity > 0.6) {
+          const addr = result.address || {};
+          
+          return {
+            found: true,
+            url: `https://openstreetmap.org/${result.osm_type}/${result.osm_id}`,
+            name: result.display_name.split(',')[0],
+            displayName: result.display_name,
+            fullAddress: [
+              addr.house_number,
+              addr.road,
+              addr.city || addr.town,
+              addr.state,
+              addr.postcode
+            ].filter(Boolean).join(', '),
+            phone: null,
+            lat: parseFloat(result.lat),
+            lon: parseFloat(result.lon),
+            type: `${result.class}/${result.type}`,
+            importance: result.importance,
+            nameMatchScore: Math.round(similarity * 100)
+          };
         }
       }
       
-      if (!bestMatch) {
-        return { 
-          found: false, 
-          reason: 'No name match',
-          _debug: {
-            searchedFor: businessName,
-            foundNames: data.slice(0, 3).map((r: any) => r.display_name.split(',')[0])
-          }
-        };
-      }
-      
-      const r = bestMatch;
-      const addr = r.address || {};
-      
-      return {
-        found: true,
-        url: `https://openstreetmap.org/${r.osm_type}/${r.osm_id}`,
-        name: r.display_name.split(',')[0],
-        displayName: r.display_name,
-        fullAddress: [
-          addr.house_number,
-          addr.road,
-          addr.city || addr.town,
-          addr.state,
-          addr.postcode
-        ].filter(Boolean).join(', '),
-        phone: null,
-        lat: parseFloat(r.lat),
-        lon: parseFloat(r.lon),
-        address: {
-          road: addr.road,
-          city: addr.city || addr.town,
-          postcode: addr.postcode,
-          country: addr.country
-        },
-        type: `${r.class}/${r.type}`,
-        importance: r.importance,
-        nameMatchScore: Math.round(bestScore * 100)
+      // No business found at this address
+      return { 
+        found: false, 
+        reason: 'No business POI found at address',
+        _debug: {
+          searchedFor: businessName,
+          foundAtAddress: data.length > 0 ? 'Address exists but no matching business' : 'Address not found'
+        }
       };
-    } catch {
-      return { found: false, error: 'Request failed' };
+    } catch (e: any) {
+      return { found: false, error: e.message };
     }
   }
 
