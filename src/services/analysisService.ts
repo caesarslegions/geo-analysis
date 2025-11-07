@@ -22,45 +22,42 @@ export interface AnalysisDoc {
   id: string;
   userId: string;
   businessName: string;
-  websiteUrl: string; // Added this
+  websiteUrl: string;
+  businessPhone?: string; // NEW: Optional phone number
   createdAt: Date;
   report: GeoReport;
 }
 
-// --- FIX: ADDING MISSING INTERFACES ---
-// We add placeholder interfaces to satisfy TypeScript and fix the build.
-// Your components are importing these, so they must be exported.
 export interface Analysis {
-  // Add properties here as needed by your components
-  // For now, just having the type exported will fix the build.
   [key: string]: any; 
 }
 
 export interface Recommendation {
   title: string;
   description: string;
-  impact: string;      // 'High', 'Medium', 'Low'
-  difficulty: string;  // 'Easy', 'Medium', 'Hard'
+  impact: string;
+  difficulty: string;
 }
-// --- END OF FIX ---
-
 
 // --- Helper function to call our multi-task API ---
 /**
  * Calls our /api/get-analysis function for a *single* task.
+ * NOW WITH PHONE NUMBER SUPPORT!
  */
 async function getSingleAnalysis(
   type: 'gbp' | 'citations' | 'onPage' | 'speed',
   businessName: string,
   fullAddress: string,
-  websiteUrl: string
+  websiteUrl: string,
+  businessPhone?: string // NEW: Optional phone parameter
 ): Promise<any> {
   
   const body = {
     businessName,
     fullAddress,
     websiteUrl,
-    type, // We send the type to tell the serverless function what to do
+    businessPhone, // NEW: Include phone in request
+    type,
   };
 
   try {
@@ -71,7 +68,6 @@ async function getSingleAnalysis(
     });
 
     if (!response.ok) {
-      // Try to parse the error from the serverless function
       try {
         const errorData = await response.json();
         throw new Error(errorData.error || `API call failed with status ${response.status}`);
@@ -80,18 +76,22 @@ async function getSingleAnalysis(
       }
     }
     
-    // We expect a JSON response for the single task
     return await response.json();
 
   } catch (error: any) {
     console.error(`Error fetching analysis type ${type}:`, error);
-    // Return a standard error object so Promise.allSettled can handle it
     return { error: error.message };
   }
 }
 
 // --- Helper function to save the report ---
-async function saveAnalysis(userId: string, report: GeoReport, businessName: string, websiteUrl: string): Promise<string> {
+async function saveAnalysis(
+  userId: string, 
+  report: GeoReport, 
+  businessName: string, 
+  websiteUrl: string,
+  businessPhone?: string // NEW: Optional phone parameter
+): Promise<string> {
   try {
     const collectionPath = `artifacts/${appId}/users/${userId}/analyses`;
     const analysesCollection = collection(db, collectionPath);
@@ -99,7 +99,8 @@ async function saveAnalysis(userId: string, report: GeoReport, businessName: str
     const docRef = await addDoc(analysesCollection, {
       userId: userId,
       businessName: businessName,
-      websiteUrl: websiteUrl, // Save the URL too
+      websiteUrl: websiteUrl,
+      businessPhone: businessPhone || '', // NEW: Save phone number
       createdAt: serverTimestamp(),
       report: report
     });
@@ -112,22 +113,22 @@ async function saveAnalysis(userId: string, report: GeoReport, businessName: str
   }
 }
 
-// --- RE-WRITTEN: This function now manages 4 parallel API calls ---
-// --- NEW: It now returns the docId (string) instead of the report ---
+// --- UPDATED: This function now accepts and passes phone number ---
 export async function generateRealReport(
   businessName: string,
   fullAddress: string,
-  websiteUrl: string
-): Promise<string> { // <-- CHANGED RETURN TYPE
+  websiteUrl: string,
+  businessPhone?: string // NEW: Optional phone parameter
+): Promise<string> {
   console.log('Starting real report generation (4 parallel client-side calls)...');
 
   try {
     // --- Step 1: Run all 4 analyses in parallel from the client ---
     const [gbpResult, citationResult, onPageResult, speedResult] = await Promise.allSettled([
-      getSingleAnalysis('gbp', businessName, fullAddress, websiteUrl),
-      getSingleAnalysis('citations', businessName, fullAddress, websiteUrl),
-      getSingleAnalysis('onPage', businessName, fullAddress, websiteUrl),
-      getSingleAnalysis('speed', businessName, fullAddress, websiteUrl)
+      getSingleAnalysis('gbp', businessName, fullAddress, websiteUrl, businessPhone),
+      getSingleAnalysis('citations', businessName, fullAddress, websiteUrl, businessPhone), // Most important for phone!
+      getSingleAnalysis('onPage', businessName, fullAddress, websiteUrl, businessPhone),
+      getSingleAnalysis('speed', businessName, fullAddress, websiteUrl, businessPhone)
     ]);
 
     // --- Step 2: Combine results into the final report ---
@@ -151,12 +152,10 @@ export async function generateRealReport(
     // --- Step 3: Get User ID and Save Report ---
     try {
       const userId = await getUserId();
-      // --- NEW: Get the ID from the save function ---
-      const docId = await saveAnalysis(userId, report, businessName, websiteUrl);
-      return docId; // <-- RETURN THE NEW ID
+      const docId = await saveAnalysis(userId, report, businessName, websiteUrl, businessPhone);
+      return docId;
     } catch (saveError: any) {
       console.error("Failed to save report, but returning to user:", saveError.message);
-      // Re-throw the error so the UI knows it failed
       throw new Error(`Failed to save report: ${saveError.message}`);
     }
 
@@ -166,7 +165,7 @@ export async function generateRealReport(
   }
 }
 
-// --- Firestore Data Fetching Functions (Unchanged) ---
+// --- Firestore Data Fetching Functions ---
 
 export async function getAllAnalyses(): Promise<AnalysisDoc[]> {
   console.log('Fetching all analyses from Firestore...');
@@ -184,7 +183,8 @@ export async function getAllAnalyses(): Promise<AnalysisDoc[]> {
         id: doc.id,
         userId: data.userId,
         businessName: data.businessName,
-        websiteUrl: data.websiteUrl || '', // Add fallback
+        websiteUrl: data.websiteUrl || '',
+        businessPhone: data.businessPhone || '', // NEW: Include phone
         createdAt: data.createdAt ? data.createdAt.toDate() : new Date(),
         report: data.report
       });
@@ -214,7 +214,8 @@ export async function getAnalysisById(id: string): Promise<AnalysisDoc | null> {
         id: docSnap.id,
         userId: data.userId,
         businessName: data.businessName,
-        websiteUrl: data.websiteUrl || '', // Add fallback
+        websiteUrl: data.websiteUrl || '',
+        businessPhone: data.businessPhone || '', // NEW: Include phone
         createdAt: data.createdAt ? data.createdAt.toDate() : new Date(),
         report: data.report
       };
@@ -228,4 +229,3 @@ export async function getAnalysisById(id: string): Promise<AnalysisDoc | null> {
     return null;
   }
 }
-

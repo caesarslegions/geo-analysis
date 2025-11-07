@@ -1,41 +1,49 @@
 import React, { useState } from 'react';
-// --- NEW: Import useNavigate ---
 import { useNavigate } from 'react-router-dom';
-// --- FIX: Using alias path ---
 import { generateRealReport } from '@/services/analysisService';
-
-// (You can delete the ResultsDisplay component from this file if you want)
-// const ResultsDisplay = ...
-
 
 export default function NewAnalysis() {
   const [businessName, setBusinessName] = useState('');
   const [fullAddress, setFullAddress] = useState('');
   const [websiteUrl, setWebsiteUrl] = useState('');
+  const [businessPhone, setBusinessPhone] = useState(''); // NEW: Phone number state
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // const [report, setReport] = useState<GeoReport | null>(null); // We don't need this anymore
   
-  // --- NEW: Initialize the navigate function ---
   const navigate = useNavigate();
+
+  // NEW: Optional phone number formatter
+  const formatPhoneNumber = (value: string): string => {
+    const phoneNumber = value.replace(/\D/g, '');
+    
+    if (phoneNumber.length <= 3) {
+      return phoneNumber;
+    } else if (phoneNumber.length <= 6) {
+      return `(${phoneNumber.slice(0, 3)}) ${phoneNumber.slice(3)}`;
+    } else {
+      return `(${phoneNumber.slice(0, 3)}) ${phoneNumber.slice(3, 6)}-${phoneNumber.slice(6, 10)}`;
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!businessName || !fullAddress || !websiteUrl) {
-      setError('Please fill in all fields.');
+      setError('Please fill in all required fields.');
       return;
     }
 
     setIsLoading(true);
     setError(null);
-    // setReport(null); // We don't need this
 
     try {
-      // --- UPDATED: This function now returns the new report ID ---
-      const newReportId: string = await generateRealReport(businessName, fullAddress, websiteUrl);
+      // Pass phone number to the report generation function
+      const newReportId: string = await generateRealReport(
+        businessName, 
+        fullAddress, 
+        websiteUrl,
+        businessPhone // NEW: Pass phone number
+      );
       
-      // --- THE FINAL STEP! ---
-      // Navigate to the beautiful results page.
       navigate(`/analysis/${newReportId}`);
 
     } catch (err: any) {
@@ -45,13 +53,14 @@ export default function NewAnalysis() {
     }
   };
 
-  // Your JSX for the form
   return (
     <div className="p-8 max-w-lg mx-auto font-sans">
       <h1 className="text-3xl font-bold mb-6 text-center text-gray-800">New GEO Analysis</h1>
       <form onSubmit={handleSubmit} className="space-y-4 bg-white p-6 shadow-md rounded-lg">
         <div>
-          <label htmlFor="businessName" className="block text-sm font-medium text-gray-700">Business Name</label>
+          <label htmlFor="businessName" className="block text-sm font-medium text-gray-700">
+            Business Name *
+          </label>
           <input
             id="businessName"
             type="text"
@@ -60,10 +69,14 @@ export default function NewAnalysis() {
             placeholder="e.g., Joe's Pizza"
             className="mt-1 w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
             disabled={isLoading}
+            required
           />
         </div>
+
         <div>
-          <label htmlFor="fullAddress" className="block text-sm font-medium text-gray-700">Full Address</label>
+          <label htmlFor="fullAddress" className="block text-sm font-medium text-gray-700">
+            Full Address *
+          </label>
           <input
             id="fullAddress"
             type="text"
@@ -72,10 +85,37 @@ export default function NewAnalysis() {
             placeholder="e.g., 123 Main St, Anytown, USA 12345"
             className="mt-1 w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
             disabled={isLoading}
+            required
           />
+          <p className="mt-1 text-xs text-gray-500">Format: Street, City, State ZIP</p>
         </div>
+
+        {/* NEW: Phone Number Field */}
         <div>
-          <label htmlFor="websiteUrl" className="block text-sm font-medium text-gray-700">Website URL</label>
+          <label htmlFor="businessPhone" className="block text-sm font-medium text-gray-700">
+            Phone Number
+          </label>
+          <input
+            id="businessPhone"
+            type="tel"
+            value={businessPhone}
+            onChange={(e) => {
+              const formatted = formatPhoneNumber(e.target.value);
+              setBusinessPhone(formatted);
+            }}
+            placeholder="(512) 555-1234"
+            className="mt-1 w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+            disabled={isLoading}
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            Optional - Helps verify your business listings are consistent
+          </p>
+        </div>
+
+        <div>
+          <label htmlFor="websiteUrl" className="block text-sm font-medium text-gray-700">
+            Website URL *
+          </label>
           <input
             id="websiteUrl"
             type="url"
@@ -84,6 +124,7 @@ export default function NewAnalysis() {
             placeholder="https://www.joespizza.com"
             className="mt-1 w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
             disabled={isLoading}
+            required
           />
         </div>
         
@@ -101,10 +142,6 @@ export default function NewAnalysis() {
           </div>
         )}
       </form>
-
-      {/* We no longer need to display the raw report here! */}
-      {/* {report && <ResultsDisplay report={report} />} */}
     </div>
   );
 }
-
