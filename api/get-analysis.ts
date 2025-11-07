@@ -650,6 +650,7 @@ export default async function handler(request: Request) {
       checkYelp(businessName, fullAddress),
       checkFoursquare(businessName, fullAddress),
       checkYellowPages(businessName, fullAddress),
+      checkBingPlaces(businessName, fullAddress), // NEW: Added Bing
       checkFacebook(businessName, fullAddress),
       checkWhitepages(businessName, fullAddress),
       checkMapQuest(businessName, fullAddress),
@@ -688,11 +689,15 @@ export default async function handler(request: Request) {
       yelp: processedResults[0],
       foursquare: processedResults[1],
       yellowPages: processedResults[2],
-      facebook: processedResults[3],
-      whitepages: processedResults[4],
-      mapquest: processedResults[5],
-      openStreetMap: processedResults[6],
+      bingPlaces: processedResults[3],
+      facebook: processedResults[4],
+      whitepages: processedResults[5],
+      mapquest: processedResults[6],
+      openStreetMap: processedResults[7],
     };
+
+    console.log('DEBUG: Processed results count:', processedResults.length);
+    console.log('DEBUG: Bing result:', processedResults[3]);
 
     // Calculate NAP consistency score
     const foundListings = Object.values(obj).filter((r: any) => r.found);
@@ -708,7 +713,7 @@ export default async function handler(request: Request) {
     const napConsistency = totalFound > 0 ? Math.round((consistentCount / totalFound) * 100) : 0;
     
     // Citation score calculation
-    const totalSources = 7;
+    const totalSources = 8; // NEW: Changed from 7 to 8
     const presenceScore = (totalFound / totalSources) * 50; // 50% weight for presence
     const consistencyScore = (napConsistency / 100) * 30; // 30% weight for consistency
     
@@ -722,7 +727,7 @@ export default async function handler(request: Request) {
       if (r.rating) itemBonus += 1;
       return bonus + (itemBonus / 5);
     }, 0);
-    const completenessScore = Math.min(20, (completenessBonus / totalFound) * 20);
+    const completenessScore = totalFound > 0 ? Math.min(20, (completenessBonus / totalFound) * 20) : 0;
     
     obj.citationScore = Math.round(presenceScore + consistencyScore + completenessScore);
     obj.napConsistency = napConsistency;
